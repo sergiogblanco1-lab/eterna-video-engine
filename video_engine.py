@@ -1,497 +1,433 @@
-print("🚀 MAIN NUEVO CARGADO")
-
-from pathlib import Path
-from typing import List
 from datetime import datetime
-
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from pathlib import Path
 
 from moviepy import (
-    VideoClip,
-    ImageClip,
     AudioFileClip,
+    ColorClip,
     CompositeAudioClip,
+    CompositeVideoClip,
+    ImageClip,
+    TextClip,
     concatenate_videoclips,
-    concatenate_audioclips,
+    vfx,
+    afx,
 )
 
 # =========================================================
-# CONFIG
+# CONFIG GENERAL
 # =========================================================
 
-WIDTH = 720
-HEIGHT = 1280
+W = 1080
+H = 1920
 FPS = 24
 
-INTRO_DURATION = 10.5
-PHOTO_DURATION = 6.0
-
-INPUTS_FOLDER = "inputs"
-RENDERS_FOLDER = "renders"
-
-SHHH_PATH = "audio/shhh.wav"
-HEART_PATH = "audio/heartbeat.wav"
-MUSIC_PATH = "audio/music.mp3"
-
-FONT_PATH = "fonts/PlayfairDisplay-Regular.ttf"
-
-INTRO_LINE_1 = "Hay recuerdos que nos unen."
-INTRO_LINE_2 = "Hagamos magia."
-
-# enumerate empieza en 0:
-# 1 = foto 2
-# 3 = foto 4
-# 5 = foto 6
-PHOTO_TEXTS = {
-    1: "Siempre hay algo que permanece.",
-    3: "Hay lazos que el tiempo no borra.",
-    5: "Lo vivido sigue aquí.",
-}
-
-TEXT_COLOR = (245, 245, 245, 255)
-TEXT_MAX_WIDTH = 580
-TEXT_FONT_SIZE = 46
-PHOTO_TEXT_Y = 940
-TEXT_LINE_SPACING = 14
-
-# Música
-MUSIC_START_IN_VIDEO = 0.0
-MUSIC_VOLUME = 0.55
-MUSIC_SOURCE_START = 0.0
-
-# Movimiento de foto
-ZOOM_START = 1.00
-ZOOM_END = 1.10
-PAN_PIXELS_X = 26
-PAN_PIXELS_Y = 18
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = BASE_DIR / "renders"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # =========================================================
-# FOLDERS
+# ARCHIVOS
 # =========================================================
 
-Path(RENDERS_FOLDER).mkdir(parents=True, exist_ok=True)
+PHOTOS = [
+    BASE_DIR / "foto1.jpg",
+    BASE_DIR / "foto2.jpg",
+    BASE_DIR / "foto3.jpg",
+    BASE_DIR / "foto4.jpg",
+    BASE_DIR / "foto5.jpg",
+    BASE_DIR / "foto6.jpg",
+]
+
+MUSIC_PATH = BASE_DIR / "music.mp3"
+HEART_PATH = BASE_DIR / "heart.mp3"
+FONT_PATH = BASE_DIR / "font.ttf"
+
+# =========================================================
+# DURACIONES
+# =========================================================
+
+# 1) Inicio logo
+OPEN_LOGO_DURATION = 2.0
+OPEN_LOGO_FADE = 0.8
+
+# 2) Intro por frases
+INTRO_TEXT_DURATION = 1.65
+INTRO_GAP_DURATION = 0.65
+INTRO_TEXT_FADE = 0.45
+
+# 3) Transición crítica
+TRANSITION_BLACK_DURATION = 2.8
+HEART_ONLY_LEAD = 0.65
+HEART_FADE_OUT = 1.5
+MUSIC_FADE_IN = 1.5
+
+# 4) Fotos
+# 5.4 te deja más cerca del rango 55s–1:05
+PHOTO_DURATION = 5.4
+PHOTO_FADE_IN = 0.8
+PHOTO_FADE_OUT = 1.0
+PHOTO_ZOOM_END = 1.07
+
+# 5) Final emocional
+FINAL_LINE_1_DURATION = 2.4
+FINAL_GAP_DURATION = 0.9
+FINAL_LINE_2_DURATION = 2.9
+FINAL_LOGO_DURATION = 2.2
+FINAL_FADE = 1.0
+
+# Export
+VIDEO_BITRATE = "3200k"
+AUDIO_BITRATE = "192k"
+
+# =========================================================
+# COPY DEFINITIVO
+# =========================================================
+
+INTRO_LINES = [
+    "No es un vídeo.",
+    "No es un momento.",
+    "Es un recuerdo.",
+    "Es magia.",
+]
+
+FINAL_LINE_1 = "Alguien pensó en ti…"
+FINAL_LINE_2 = "…eso es magia."
+LOGO_TEXT = "ETERNA"
 
 # =========================================================
 # HELPERS
 # =========================================================
 
-def get_output_path() -> str:
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return str(Path(RENDERS_FOLDER) / f"eterna_{stamp}.mp4")
+def font_kwargs():
+    if FONT_PATH.exists():
+        return {"font": str(FONT_PATH)}
+    return {}
 
+def ensure_files_exist():
+    missing = []
 
-def load_photos(folder: str) -> List[str]:
-    path = Path(folder)
-    if not path.exists():
-        raise FileNotFoundError(f"No existe la carpeta: {folder}")
+    for p in PHOTOS:
+        if not p.exists():
+            missing.append(str(p))
 
-    files = list(path.glob("*"))
-    imgs = [
-        str(f) for f in files
-        if f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]
-    ]
-    imgs.sort()
+    if not MUSIC_PATH.exists():
+        missing.append(str(MUSIC_PATH))
 
-    if len(imgs) < 6:
-        raise ValueError(f"Necesitas al menos 6 fotos. Encontradas: {len(imgs)}")
+    if not HEART_PATH.exists():
+        missing.append(str(HEART_PATH))
 
-    return imgs[:6]
+    if missing:
+        print("\n❌ FALTAN ARCHIVOS:")
+        for item in missing:
+            print(" -", item)
+        raise FileNotFoundError("Faltan archivos necesarios.")
 
+def black_clip(duration: float):
+    return ColorClip(size=(W, H), color=(0, 0, 0)).with_duration(duration)
 
-def load_image(path: str) -> Image.Image:
-    img = Image.open(path)
-    img = ImageOps.exif_transpose(img)
-    return img.convert("RGB")
+def make_text(
+    text: str,
+    duration: float,
+    font_size: int,
+    fade_in: float,
+    fade_out: float,
+    y: int | str = "center",
+):
+    txt = TextClip(
+        text=text,
+        font_size=font_size,
+        color="white",
+        method="caption",
+        size=(920, None),
+        text_align="center",
+        **font_kwargs(),
+    )
 
+    return (
+        txt.with_duration(duration)
+        .with_position(("center", y))
+        .with_effects([
+            vfx.FadeIn(fade_in),
+            vfx.FadeOut(fade_out),
+        ])
+    )
 
-def pil_to_np(img: Image.Image) -> np.ndarray:
-    return np.array(img.convert("RGB"))
+def make_shadowed_text(
+    text: str,
+    duration: float,
+    font_size: int,
+    fade_in: float,
+    fade_out: float,
+    y: int | str = "center",
+):
+    shadow = TextClip(
+        text=text,
+        font_size=font_size,
+        color="black",
+        method="caption",
+        size=(920, None),
+        text_align="center",
+        **font_kwargs(),
+    )
 
+    main = TextClip(
+        text=text,
+        font_size=font_size,
+        color="white",
+        method="caption",
+        size=(920, None),
+        text_align="center",
+        **font_kwargs(),
+    )
 
-def get_font(size: int):
-    candidates = [
-        FONT_PATH,
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-    ]
+    shadow_y = y if isinstance(y, str) else y + 5
 
-    for p in candidates:
-        if Path(p).exists():
-            try:
-                return ImageFont.truetype(p, size)
-            except Exception:
-                pass
+    shadow = (
+        shadow.with_duration(duration)
+        .with_position(("center", shadow_y))
+        .with_effects([
+            vfx.FadeIn(fade_in),
+            vfx.FadeOut(fade_out),
+        ])
+    )
 
-    return ImageFont.load_default()
+    main = (
+        main.with_duration(duration)
+        .with_position(("center", y))
+        .with_effects([
+            vfx.FadeIn(fade_in),
+            vfx.FadeOut(fade_out),
+        ])
+    )
 
+    return CompositeVideoClip([shadow, main], size=(W, H)).with_duration(duration)
 
-FONT = get_font(TEXT_FONT_SIZE)
-DUMMY_IMG = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-DUMMY_DRAW = ImageDraw.Draw(DUMMY_IMG)
+def fit_image_to_frame(path: Path):
+    clip = ImageClip(str(path))
+    iw, ih = clip.size
+    target_ratio = W / H
+    image_ratio = iw / ih
 
-
-def measure_text(text: str, font) -> tuple[int, int]:
-    x0, y0, x1, y1 = DUMMY_DRAW.textbbox((0, 0), text, font=font)
-    return x1 - x0, y1 - y0
-
-
-def wrap_text(text: str, max_width: int) -> List[str]:
-    words = text.split()
-    lines: List[str] = []
-    current = ""
-
-    for word in words:
-        test = f"{current} {word}" if current else word
-        w, _ = measure_text(test, FONT)
-
-        if w <= max_width:
-            current = test
-        else:
-            if current:
-                lines.append(current)
-            current = word
-
-    if current:
-        lines.append(current)
-
-    return lines
-
-
-def draw_centered_text(base_rgb: np.ndarray, text: str, y_center: int) -> np.ndarray:
-    img = Image.fromarray(base_rgb).convert("RGBA")
-    overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    lines = wrap_text(text, TEXT_MAX_WIDTH)
-
-    line_heights = []
-    line_widths = []
-
-    for line in lines:
-        x0, y0, x1, y1 = draw.textbbox((0, 0), line, font=FONT)
-        line_widths.append(x1 - x0)
-        line_heights.append(y1 - y0)
-
-    total_height = sum(line_heights) + max(0, (len(lines) - 1) * TEXT_LINE_SPACING)
-    current_y = y_center - total_height // 2
-
-    for i, line in enumerate(lines):
-        w = line_widths[i]
-        h = line_heights[i]
-        x = (WIDTH - w) // 2
-
-        draw.text((x + 2, current_y + 2), line, font=FONT, fill=(0, 0, 0, 110))
-        draw.text((x, current_y), line, font=FONT, fill=TEXT_COLOR)
-
-        current_y += h + TEXT_LINE_SPACING
-
-    composed = Image.alpha_composite(img, overlay)
-    return np.array(composed.convert("RGB"))
-
-
-def fit_cover(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
-    w, h = img.size
-    ratio = w / h
-    target_ratio = target_w / target_h
-
-    if ratio > target_ratio:
-        new_h = target_h
-        new_w = int(ratio * new_h)
+    if image_ratio > target_ratio:
+        clip = clip.resized(height=H)
+        clip = clip.cropped(
+            width=W,
+            height=H,
+            x_center=clip.w / 2,
+            y_center=clip.h / 2,
+        )
     else:
-        new_w = target_w
-        new_h = int(new_w / ratio)
+        clip = clip.resized(width=W)
+        clip = clip.cropped(
+            width=W,
+            height=H,
+            x_center=clip.w / 2,
+            y_center=clip.h / 2,
+        )
 
-    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-    left = (new_w - target_w) // 2
-    top = (new_h - target_h) // 2
-    return img.crop((left, top, left + target_w, top + target_h))
-
-
-def make_animated_photo_frames(path: str, phrase: str | None = None) -> np.ndarray:
-    base_img = load_image(path)
-
-    canvas_w = int(WIDTH * ZOOM_END) + abs(PAN_PIXELS_X) * 2 + 40
-    canvas_h = int(HEIGHT * ZOOM_END) + abs(PAN_PIXELS_Y) * 2 + 40
-
-    prepared = fit_cover(base_img, canvas_w, canvas_h)
-    prepared_np = pil_to_np(prepared)
-
-    if phrase:
-        prepared_np = draw_centered_text(prepared_np, phrase, int(PHOTO_TEXT_Y * (canvas_h / HEIGHT)))
-
-    return prepared_np
-
+    return clip
 
 # =========================================================
-# INTRO
+# BLOQUES DE VÍDEO
 # =========================================================
 
-gradient = np.linspace(0, 18, HEIGHT, dtype=np.uint8).reshape(HEIGHT, 1, 1)
-INTRO_BG = np.repeat(gradient, WIDTH, axis=1)
-INTRO_BG = np.repeat(INTRO_BG, 3, axis=2)
+def make_logo_block(duration: float, fade: float):
+    bg = black_clip(duration)
+    logo = make_shadowed_text(
+        text=LOGO_TEXT,
+        duration=duration,
+        font_size=94,
+        fade_in=fade,
+        fade_out=fade,
+        y="center",
+    )
+    return CompositeVideoClip([bg, logo], size=(W, H)).with_duration(duration)
 
+def make_intro_line(text: str):
+    bg = black_clip(INTRO_TEXT_DURATION)
+    txt = make_shadowed_text(
+        text=text,
+        duration=INTRO_TEXT_DURATION,
+        font_size=74,
+        fade_in=INTRO_TEXT_FADE,
+        fade_out=INTRO_TEXT_FADE,
+        y="center",
+    )
+    return CompositeVideoClip([bg, txt], size=(W, H)).with_duration(INTRO_TEXT_DURATION)
 
-def fade_alpha(t: float, start: float, end: float) -> float:
-    if end <= start:
-        return 1.0
+def make_gap():
+    return black_clip(INTRO_GAP_DURATION)
 
-    progress = (t - start) / (end - start)
-    progress = max(0.0, min(1.0, progress))
-    fade_in = min(progress * 2.0, 1.0)
-    fade_out = min((1.0 - progress) * 2.0, 1.0)
-    return min(fade_in, fade_out)
+def make_transition_black():
+    return black_clip(TRANSITION_BLACK_DURATION)
 
+def make_photo_clip(path: Path, index: int):
+    base = fit_image_to_frame(path).with_duration(PHOTO_DURATION).with_fps(FPS)
 
-def render_fading_text(bg_rgb: np.ndarray, text: str, alpha: float) -> np.ndarray:
-    img = Image.fromarray(bg_rgb.copy()).convert("RGBA")
-    overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+    base = base.with_effects([
+        vfx.BlackAndWhite(),
+    ])
 
-    lines = wrap_text(text, TEXT_MAX_WIDTH)
+    zoom_end = PHOTO_ZOOM_END + (0.01 if index % 2 == 0 else 0.0)
 
-    line_sizes = [draw.textbbox((0, 0), line, font=FONT) for line in lines]
-    widths = [x1 - x0 for x0, y0, x1, y1 in line_sizes]
-    heights = [y1 - y0 for x0, y0, x1, y1 in line_sizes]
-
-    total_height = sum(heights) + max(0, (len(lines) - 1) * TEXT_LINE_SPACING)
-    current_y = HEIGHT // 2 - total_height // 2
-
-    for i, line in enumerate(lines):
-        x = (WIDTH - widths[i]) // 2
-        fill = (245, 245, 245, int(255 * alpha))
-        shadow = (0, 0, 0, int(110 * alpha))
-
-        draw.text((x + 2, current_y + 2), line, font=FONT, fill=shadow)
-        draw.text((x, current_y), line, font=FONT, fill=fill)
-
-        current_y += heights[i] + TEXT_LINE_SPACING
-
-    return np.array(Image.alpha_composite(img, overlay).convert("RGB"))
-
-
-def intro_frame(t: float) -> np.ndarray:
-    if 4.5 <= t <= 6.5:
-        alpha = fade_alpha(t, 4.5, 6.5)
-        return render_fading_text(INTRO_BG, INTRO_LINE_1, alpha)
-
-    if 7.5 <= t <= 10.0:
-        alpha = fade_alpha(t, 7.5, 10.0)
-        return render_fading_text(INTRO_BG, INTRO_LINE_2, alpha)
-
-    return INTRO_BG
-
-
-def build_intro() -> VideoClip:
-    return VideoClip(frame_function=intro_frame, duration=INTRO_DURATION).with_fps(FPS)
-
-
-# =========================================================
-# PHOTO CLIPS
-# =========================================================
-
-def build_photo_clip(path: str, phrase: str | None = None, index: int = 0) -> VideoClip:
-    prepared = make_animated_photo_frames(path, phrase)
-    source_h, source_w = prepared.shape[:2]
-
-    extra_w = max(0, source_w - WIDTH)
-    extra_h = max(0, source_h - HEIGHT)
-
-    directions = [
-        (1, 1),
-        (-1, 1),
-        (1, -1),
-        (-1, -1),
-        (1, 0),
-        (0, 1),
-    ]
-    dir_x, dir_y = directions[index % len(directions)]
-
-    def frame_function(t: float) -> np.ndarray:
+    def zoom_factor(t: float):
         progress = max(0.0, min(1.0, t / PHOTO_DURATION))
+        return 1.0 + (zoom_end - 1.0) * progress
 
-        zoom = ZOOM_START + (ZOOM_END - ZOOM_START) * progress
+    moving = base.resized(lambda t: zoom_factor(t))
 
-        crop_w = int(WIDTH / zoom)
-        crop_h = int(HEIGHT / zoom)
+    direction = -1 if index % 2 == 0 else 1
+    drift = 18
 
-        crop_w = min(crop_w, source_w)
-        crop_h = min(crop_h, source_h)
+    def pos_fn(t: float):
+        progress = max(0.0, min(1.0, t / PHOTO_DURATION))
+        x = direction * drift * (progress - 0.5)
+        return (x, 0)
 
-        center_x = source_w // 2
-        center_y = source_h // 2
+    moving = (
+        moving.with_position(pos_fn)
+        .with_effects([
+            vfx.FadeIn(PHOTO_FADE_IN),
+            vfx.FadeOut(PHOTO_FADE_OUT),
+        ])
+    )
 
-        max_shift_x = min(extra_w // 4, PAN_PIXELS_X)
-        max_shift_y = min(extra_h // 4, PAN_PIXELS_Y)
+    return CompositeVideoClip([moving], size=(W, H)).with_duration(PHOTO_DURATION)
 
-        shift_x = int(dir_x * max_shift_x * progress)
-        shift_y = int(dir_y * max_shift_y * progress)
+def make_final_line(text: str, duration: float):
+    bg = black_clip(duration)
+    txt = make_shadowed_text(
+        text=text,
+        duration=duration,
+        font_size=74,
+        fade_in=0.7,
+        fade_out=0.9,
+        y="center",
+    )
+    return CompositeVideoClip([bg, txt], size=(W, H)).with_duration(duration)
 
-        left = center_x - crop_w // 2 + shift_x
-        top = center_y - crop_h // 2 + shift_y
+# =========================================================
+# MONTAJE VÍDEO
+# =========================================================
 
-        left = max(0, min(left, source_w - crop_w))
-        top = max(0, min(top, source_h - crop_h))
+def build_video():
+    clips = []
 
-        cropped = prepared[top:top + crop_h, left:left + crop_w]
-        frame = Image.fromarray(cropped).resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
-        return np.array(frame)
+    clips.append(make_logo_block(OPEN_LOGO_DURATION, OPEN_LOGO_FADE))
+    clips.append(black_clip(0.45))
 
-    return VideoClip(frame_function=frame_function, duration=PHOTO_DURATION).with_fps(FPS)
+    for i, line in enumerate(INTRO_LINES):
+        clips.append(make_intro_line(line))
+        if i < len(INTRO_LINES) - 1:
+            clips.append(make_gap())
 
+    clips.append(make_transition_black())
+
+    for i, photo in enumerate(PHOTOS):
+        clips.append(make_photo_clip(photo, i))
+
+    clips.append(make_final_line(FINAL_LINE_1, FINAL_LINE_1_DURATION))
+    clips.append(black_clip(FINAL_GAP_DURATION))
+    clips.append(make_final_line(FINAL_LINE_2, FINAL_LINE_2_DURATION))
+    clips.append(black_clip(0.7))
+    clips.append(make_logo_block(FINAL_LOGO_DURATION, FINAL_FADE))
+
+    return concatenate_videoclips(clips, method="compose").with_fps(FPS)
 
 # =========================================================
 # AUDIO
 # =========================================================
 
-def build_looped_audio_segment(audio_path: str, source_start: float, target_duration: float):
-    if not Path(audio_path).exists():
-        return None
+def build_audio(final_duration: float):
+    heart = AudioFileClip(str(HEART_PATH))
+    music = AudioFileClip(str(MUSIC_PATH))
 
-    base = AudioFileClip(audio_path)
+    intro_duration = (
+        OPEN_LOGO_DURATION
+        + 0.45
+        + len(INTRO_LINES) * INTRO_TEXT_DURATION
+        + (len(INTRO_LINES) - 1) * INTRO_GAP_DURATION
+    )
 
-    try:
-        actual_source_start = max(0.0, min(source_start, max(0.0, base.duration - 0.01)))
-        usable = base.subclipped(actual_source_start, base.duration)
+    transition_start = intro_duration
+    heart_start = transition_start
+    music_start = transition_start + HEART_ONLY_LEAD
 
-        if usable.duration <= 0:
-            usable.close()
-            base.close()
-            return None
+    # Corazón limitado exactamente a la negra de transición
+    heart_target_duration = TRANSITION_BLACK_DURATION
+    if heart.duration > heart_target_duration:
+        heart = heart.subclipped(0, heart_target_duration)
+    else:
+        heart = heart.with_duration(heart_target_duration)
 
-        pieces = []
-        remaining = target_duration
+    heart = (
+        heart.with_effects([
+            afx.AudioFadeOut(HEART_FADE_OUT),
+        ])
+        .with_start(heart_start)
+    )
 
-        while remaining > 0:
-            part_duration = min(usable.duration, remaining)
-            pieces.append(usable.subclipped(0, part_duration))
-            remaining -= part_duration
+    # Música desde la transición hasta el final
+    max_music_available = max(0.0, final_duration - music_start)
+    if music.duration > max_music_available:
+        music = music.subclipped(0, max_music_available)
 
-        looped = concatenate_audioclips(pieces)
+    music = (
+        music.with_effects([
+            afx.AudioFadeIn(MUSIC_FADE_IN),
+            afx.AudioFadeOut(2.6),
+        ])
+        .with_start(music_start)
+    )
 
-        usable.close()
-        base.close()
-
-        return looped
-
-    except Exception:
-        try:
-            base.close()
-        except Exception:
-            pass
-        raise
-
-
-def build_audio(total_duration: float):
-    clips = []
-
-    if Path(SHHH_PATH).exists():
-        shhh = (
-            AudioFileClip(SHHH_PATH)
-            .with_start(1.0)
-            .with_volume_scaled(0.40)
-        )
-        clips.append(shhh)
-
-    if Path(HEART_PATH).exists():
-        heart_src = AudioFileClip(HEART_PATH)
-        try:
-            start_src = min(1.2, max(0.0, heart_src.duration - 0.01))
-            end_src = min(6.2, heart_src.duration)
-
-            if end_src > start_src:
-                heart = (
-                    heart_src
-                    .subclipped(start_src, end_src)
-                    .with_start(4.5)
-                    .with_volume_scaled(0.35)
-                )
-                clips.append(heart)
-            else:
-                heart_src.close()
-        except Exception:
-            try:
-                heart_src.close()
-            except Exception:
-                pass
-            raise
-
-    music_needed = max(0.0, total_duration - MUSIC_START_IN_VIDEO)
-    if music_needed > 0 and Path(MUSIC_PATH).exists():
-        looped_music = build_looped_audio_segment(
-            audio_path=MUSIC_PATH,
-            source_start=MUSIC_SOURCE_START,
-            target_duration=music_needed,
-        )
-
-        if looped_music is not None:
-            music = (
-                looped_music
-                .with_start(MUSIC_START_IN_VIDEO)
-                .with_volume_scaled(MUSIC_VOLUME)
-            )
-            clips.append(music)
-
-    if not clips:
-        return None
-
-    return CompositeAudioClip(clips)
-
+    return CompositeAudioClip([heart, music]).with_duration(final_duration)
 
 # =========================================================
-# MAIN
+# EXPORT
 # =========================================================
 
-def build_video():
-    print("🔥 EJECUTANDO NUEVO VIDEO 🔥")
+def export_video():
+    ensure_files_exist()
 
-    photos = load_photos(INPUTS_FOLDER)
-
-    clips = [build_intro()]
-
-    for i, p in enumerate(photos):
-        phrase = PHOTO_TEXTS.get(i)
-        clips.append(build_photo_clip(p, phrase, i))
-
-    video = concatenate_videoclips(clips, method="compose")
-
-    audio = build_audio(video.duration)
-    if audio is not None:
-        video = video.with_audio(audio)
-
-    output_path = get_output_path()
-
-    print(f"🎬 Guardando vídeo en: {output_path}")
+    video = None
+    audio = None
+    final = None
 
     try:
-        video.write_videofile(
-            output_path,
+        video = build_video()
+        audio = build_audio(video.duration)
+        final = video.with_audio(audio)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = OUTPUT_DIR / f"eterna_definitivo_{timestamp}.mp4"
+
+        print("\n🎬 GENERANDO ETERNA...")
+        print("📁 Base:", BASE_DIR)
+        print("🎵 Música:", MUSIC_PATH)
+        print("🫀 Corazón:", HEART_PATH)
+        print("💾 Salida:", output_path)
+        print(f"⏱ Duración total aprox: {final.duration:.2f} s")
+
+        final.write_videofile(
+            str(output_path),
             fps=FPS,
             codec="libx264",
             audio_codec="aac",
-            audio_fps=44100,
+            bitrate=VIDEO_BITRATE,
+            audio_bitrate=AUDIO_BITRATE,
         )
-        print(f"✅ Vídeo creado: {output_path}")
+
+        print("\n✅ VÍDEO ETERNA GENERADO")
+        print(output_path.resolve())
 
     finally:
-        try:
+        # Cerrar clips para evitar archivos bloqueados al re-renderizar
+        if final is not None:
+            final.close()
+        if audio is not None:
+            audio.close()
+        if video is not None:
             video.close()
-        except Exception:
-            pass
-
-        try:
-            if audio is not None:
-                audio.close()
-        except Exception:
-            pass
-
-        for c in clips:
-            try:
-                c.close()
-            except Exception:
-                pass
-
 
 if __name__ == "__main__":
-    build_video()
+    export_video()
