@@ -2,7 +2,6 @@ from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageOps
-
 from moviepy import (
     AudioFileClip,
     ColorClip,
@@ -10,468 +9,443 @@ from moviepy import (
     CompositeVideoClip,
     ImageClip,
     TextClip,
-    concatenate_videoclips,
     concatenate_audioclips,
-    afx,
+    concatenate_videoclips,
     vfx,
+    afx,
 )
 
 # =========================================================
-# CONFIG GENERAL
+# CONFIG
 # =========================================================
 
 W = 720
 H = 1280
 FPS = 20
 
-VIDEO_BITRATE = "1800k"
-AUDIO_BITRATE = "128k"
-
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "renders"
-TEMP_DIR = BASE_DIR / "temp_fixed"
 OUTPUT_DIR.mkdir(exist_ok=True)
-TEMP_DIR.mkdir(exist_ok=True)
 
-# ---------------------------------------------------------
-# RECURSOS
-# ---------------------------------------------------------
-
-FONT_PATH = BASE_DIR / "font.ttf"
-MUSIC_PATH = BASE_DIR / "music.mp3"
-HEART_PATH = BASE_DIR / "heart.mp3"
-
-PHOTOS = [
-    BASE_DIR / "foto1.jpg",
-    BASE_DIR / "foto2.jpg",
-    BASE_DIR / "foto3.jpg",
-    BASE_DIR / "foto4.jpg",
-    BASE_DIR / "foto5.jpg",
-    BASE_DIR / "foto6.jpg",
-]
-
-# =========================================================
-# TEXTOS
-# =========================================================
-
-LOGO_TEXT = "ETERNA"
-
-INTRO_LINES = [
-    "No es un vídeo.",
-    "No es solo un momento.",
-    "Esto es magia.",
-]
-
-PHOTO_LINES = [
-    "Tu frase 1 aquí",
-    "Tu frase 2 aquí",
-    "Tu frase 3 aquí",
-]
-
-FINAL_LINES = [
-    "Es bonito que alguien se acuerde de ti…",
-    "Eso es magia.",
-]
+VIDEO_BITRATE = "1600k"
+AUDIO_BITRATE = "96k"
 
 # =========================================================
 # DURACIONES
 # =========================================================
 
-OPEN_LOGO_DURATION = 2.6
-OPEN_LOGO_FADE = 1.0
+OPEN_LOGO_ONLY_DURATION = 2.0
+OPEN_LOGO_FADE_DURATION = 2.0
 
-INTRO_LINE_DURATION = 3.0
-INTRO_LINE_FADE = 0.85
-INTRO_GAP = 0.25
+INTRO_TEXT_DURATION = 4.8
+INTRO_GAP_DURATION = 2.0
+INTRO_TEXT_FADE = 1.4
 
-PRE_PHOTOS_BLACK = 1.2
+TRANSITION_BLACK_DURATION = 6.0
 
-PHOTO_DURATION = 5.6
-PHOTO_FADE = 1.0
+PHOTO_DURATIONS = [7.2, 8.2, 7.3, 8.4, 7.4, 8.6]
+PHOTO_FADE_IN = 1.8
+PHOTO_FADE_OUT = 1.8
 
-PHOTO_TEXT_DURATION = 3.0
-PHOTO_TEXT_FADE = 0.85
+# zoom un poco más vivo
+PHOTO_ZOOM_IN_START = 1.00
+PHOTO_ZOOM_IN_END = 1.07
+PHOTO_ZOOM_OUT_START = 1.05
+PHOTO_ZOOM_OUT_END = 1.00
 
-FINAL_LINE_DURATION = 3.0
-FINAL_LINE_FADE = 0.85
-FINAL_GAP = 0.65
+PHRASE_DURATION = 4.2
+PHRASE_FADE = 1.4
 
-FINAL_BLACK_BEFORE_LOGO = 0.7
-FINAL_LOGO_DURATION = 3.8
-FINAL_LOGO_FADE = 1.2
+FINAL_LINE_1_DURATION = 4.5
+FINAL_GAP_DURATION = 2.0
+FINAL_LINE_2_DURATION = 4.8
+FINAL_LOGO_DURATION = 5.5
+FINAL_BLACK_HOLD_DURATION = 3.0
+FINAL_FADE = 1.8
 
-HEART_FADE_OUT = 2.0
-MUSIC_FADE_IN = 2.0
-MUSIC_FADE_OUT = 2.5
+HEART_VOLUME = 3.0
+HEART_FADE_OUT = 1.4
 
-# =========================================================
-# ESTILO
-# =========================================================
-
-BG_COLOR = (0, 0, 0)
-TEXT_COLOR = "white"
-
-LOGO_FONT_SIZE = 72
-INTRO_FONT_SIZE = 58
-PHOTO_FONT_SIZE = 56
-FINAL_FONT_SIZE = 54
-
-TEXT_BOTTOM_Y = int(H * 0.82)
+MUSIC_FADE_IN = 5.5
+MUSIC_FADE_OUT = 3.0
+MUSIC_VOLUME = 0.8
+MUSIC_FINAL_VOLUME = 0.85
 
 # =========================================================
-# HELPERS
+# TEXTOS
 # =========================================================
 
-def assert_exists(path: Path, label: str) -> None:
-    if not path.exists():
-        raise FileNotFoundError(f"No existe {label}: {path}")
+INTRO_LINES = [
+    "No es un momento...",
+    "No es solo un recuerdo...",
+    "Es magia.",
+]
 
+PHOTO_PHRASES = {
+    1: "Desde el primer momento...\nsupe que mi vida ya no era mia.",
+    3: "Creces...\ny ojala pudiera detener el tiempo\nun segundo mas.",
+    5: "Y pase lo que pase...\nsiempre vas a ser mi pequena.",
+}
 
-def fix_image_orientation(src_path: Path) -> Path:
-    """
-    Corrige orientación EXIF y guarda una copia temporal.
-    """
-    out_path = TEMP_DIR / f"fixed_{src_path.stem}.jpg"
-    with Image.open(src_path) as img:
-        img = ImageOps.exif_transpose(img)
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        img.save(out_path, quality=95)
-    return out_path
+FINAL_LINE_1 = "Alguien penso en ti..."
+FINAL_LINE_2 = "...de una forma que nunca vas a olvidar."
+LOGO_TEXT = "ETERNA"
 
+# =========================================================
+# RUTAS
+# =========================================================
 
-def make_black_clip(duration: float):
-    return ColorClip(size=(W, H), color=BG_COLOR, duration=duration)
+def find_inputs_dir():
+    for name in ["inputs", "INPUTS", "Inputs"]:
+        p = BASE_DIR / name
+        if p.exists():
+            return p
+    raise FileNotFoundError("No encuentro carpeta inputs")
 
+def find_audio(filename):
+    for p in [
+        BASE_DIR / filename,
+        BASE_DIR / "music" / filename,
+        BASE_DIR / "audio" / filename,
+    ]:
+        if p.exists():
+            return p
+    raise FileNotFoundError(f"No encuentro {filename}")
 
-def make_text_clip(
-    text: str,
-    font_size: int,
-    duration: float,
-    fade: float,
-    y_pos,
+def get_photos(inputs_dir):
+    photos = list(inputs_dir.glob("*.jpg"))
+    photos += list(inputs_dir.glob("*.jpeg"))
+    photos += list(inputs_dir.glob("*.png"))
+    photos = sorted(set(photos))
+
+    if len(photos) < 6:
+        raise Exception("Necesitas al menos 6 fotos en la carpeta inputs")
+
+    return photos[:6]
+
+def resolve_paths():
+    inputs_dir = find_inputs_dir()
+    photos = get_photos(inputs_dir)
+    music = find_audio("music.mp3")
+    heart = find_audio("heart.mp3")
+
+    print("\n=== RUTAS ===")
+    print("inputs :", inputs_dir)
+    for i, p in enumerate(photos, start=1):
+        print(f"foto {i} :", p.name)
+    print("music  :", music)
+    print("heart  :", heart)
+
+    return photos, music, heart
+
+# =========================================================
+# HELPERS VISUALES
+# =========================================================
+
+def black_clip(d):
+    return ColorClip((W, H), color=(8, 8, 8)).with_duration(d)
+
+def safe_text_clip(
+    text,
+    d,
+    font_size=42,
+    fade=1.0,
+    y="center",
+    stroke_width=1.1,
 ):
-    """
-    method='label' para evitar cortes raros de texto.
-    """
     txt = TextClip(
         text=text,
-        font=str(FONT_PATH),
         font_size=font_size,
-        color=TEXT_COLOR,
-        method="label",
+        color="white",
+        method="caption",
+        size=(int(W * 0.72), int(H * 0.28)),
         text_align="center",
-    )
+        horizontal_align="center",
+        vertical_align="center",
+        stroke_color="black",
+        stroke_width=stroke_width,
+        interline=6,
+        margin=(0, 18),
+    ).with_duration(d)
 
-    txt = txt.with_duration(duration)
-    txt = txt.with_position(("center", y_pos))
-    txt = txt.with_effects(
-        [
-            vfx.CrossFadeIn(fade),
-            vfx.CrossFadeOut(fade),
-        ]
-    )
-    return txt
+    return txt.with_position(("center", y)).with_effects([
+        vfx.FadeIn(fade),
+        vfx.FadeOut(fade),
+    ])
 
+def normalize_image_to_temp(img_path: Path) -> Path:
+    temp_dir = BASE_DIR / "temp_fixed"
+    temp_dir.mkdir(exist_ok=True)
 
-def make_center_text_block(text: str, font_size: int, duration: float, fade: float):
-    base = make_black_clip(duration)
-    txt = make_text_clip(
-        text=text,
-        font_size=font_size,
-        duration=duration,
-        fade=fade,
-        y_pos="center",
-    )
-    return CompositeVideoClip([base, txt], size=(W, H)).with_duration(duration)
+    out_path = temp_dir / f"{img_path.stem}_fixed.jpg"
 
+    img = Image.open(img_path)
+    img = ImageOps.exif_transpose(img)
+    rgb = img.convert("RGB")
+    rgb.save(out_path, quality=92)
 
-def make_logo_block(duration: float, fade: float):
-    base = make_black_clip(duration)
-    txt = make_text_clip(
-        text=LOGO_TEXT,
-        font_size=LOGO_FONT_SIZE,
-        duration=duration,
-        fade=fade,
-        y_pos="center",
-    )
-    return CompositeVideoClip([base, txt], size=(W, H)).with_duration(duration)
+    return out_path
 
-
-def build_ken_burns(clip: ImageClip, duration: float, zoom_start: float, zoom_end: float):
-    """
-    Zoom suave progresivo.
-    """
-    clip = clip.with_duration(duration)
-
-    def zoom_factor(t):
-        if duration <= 0:
-            return zoom_end
-        progress = min(max(t / duration, 0), 1)
-        return zoom_start + (zoom_end - zoom_start) * progress
-
-    return clip.resized(lambda t: zoom_factor(t))
-
-
-def make_photo_base_clip(photo_path: Path, duration: float):
-    fixed_path = fix_image_orientation(photo_path)
-
-    clip = ImageClip(str(fixed_path)).with_duration(duration)
-
-    # Escalado para cubrir pantalla vertical sin deformar
+def fit_cover(img_path):
+    fixed_path = normalize_image_to_temp(Path(img_path))
+    clip = ImageClip(str(fixed_path))
     scale = max(W / clip.w, H / clip.h)
     clip = clip.resized(scale)
 
-    # Blanco y negro
-    clip = clip.with_effects([vfx.BlackAndWhite()])
-
-    # Zoom suave
-    clip = build_ken_burns(
-        clip=clip,
-        duration=duration,
-        zoom_start=1.00,
-        zoom_end=1.08,
-    )
-
-    # Centrado
-    clip = clip.with_position("center")
-
-    # Recorte exacto al marco final
-    clip = clip.cropped(
-        x_center=clip.w / 2,
-        y_center=clip.h / 2,
+    return clip.cropped(
         width=W,
         height=H,
+        x_center=clip.w / 2,
+        y_center=clip.h / 2,
     )
 
-    # Fundidos
-    clip = clip.with_effects(
-        [
-            vfx.CrossFadeIn(PHOTO_FADE),
-            vfx.CrossFadeOut(PHOTO_FADE),
-        ]
-    )
+def build_photo_clip(img_path, duration, phrase=None, zoom_mode="in", move_x=0, move_y=0):
+    base = fit_cover(img_path).with_duration(duration)
 
-    return clip
+    if zoom_mode == "out":
+        def zoom_factor(t):
+            return PHOTO_ZOOM_OUT_START + (PHOTO_ZOOM_OUT_END - PHOTO_ZOOM_OUT_START) * (t / duration)
+    else:
+        def zoom_factor(t):
+            return PHOTO_ZOOM_IN_START + (PHOTO_ZOOM_IN_END - PHOTO_ZOOM_IN_START) * (t / duration)
 
+    moving = base.resized(lambda t: zoom_factor(t))
 
-def make_photo_block(photo_path: Path, duration: float, overlay_text: str | None = None):
-    base = make_photo_base_clip(photo_path, duration)
+    # desplazamiento suave lateral/vertical
+    def pos_fn(t):
+        x = move_x * (t / duration)
+        y = move_y * (t / duration)
+        return ("center", "center") if (move_x == 0 and move_y == 0) else (x, y)
 
-    layers = [base]
+    if move_x != 0 or move_y != 0:
+        moving = moving.with_position(pos_fn)
 
-    if overlay_text:
-        txt = make_text_clip(
-            text=overlay_text,
-            font_size=PHOTO_FONT_SIZE,
-            duration=PHOTO_TEXT_DURATION,
-            fade=PHOTO_TEXT_FADE,
-            y_pos=TEXT_BOTTOM_Y,
-        )
+    moving = moving.with_effects([
+        vfx.BlackAndWhite(),
+        vfx.FadeIn(PHOTO_FADE_IN),
+        vfx.FadeOut(PHOTO_FADE_OUT),
+    ])
 
-        text_start = max((duration - PHOTO_TEXT_DURATION) / 2, 0.6)
-        txt = txt.with_start(text_start)
-        layers.append(txt)
+    layers = [moving]
+
+    if phrase:
+        phrase_clip = safe_text_clip(
+            phrase,
+            d=PHRASE_DURATION,
+            font_size=38,
+            fade=PHRASE_FADE,
+            y=int(H * 0.78),
+            stroke_width=1.2,
+        ).with_start((duration - PHRASE_DURATION) / 2)
+
+        layers.append(phrase_clip)
 
     return CompositeVideoClip(layers, size=(W, H)).with_duration(duration)
 
+# =========================================================
+# VIDEO
+# =========================================================
 
-def loop_audio_to_duration(audio_clip: AudioFileClip, duration: float):
-    """
-    Repite el audio hasta cubrir toda la duración.
-    """
-    if audio_clip.duration >= duration:
-        return audio_clip.subclipped(0, duration)
-
+def build_video(photos):
     clips = []
-    current = 0.0
-    while current < duration:
-        remaining = duration - current
-        part = audio_clip.subclipped(0, min(audio_clip.duration, remaining))
-        clips.append(part)
-        current += part.duration
 
-    return concatenate_audioclips(clips)
-
-
-# =========================================================
-# CONSTRUCCIÓN DEL VÍDEO
-# =========================================================
-
-def build_video():
-    # ---- Validaciones
-    assert_exists(FONT_PATH, "fuente")
-    assert_exists(MUSIC_PATH, "música")
-    assert_exists(HEART_PATH, "corazón")
-
-    for i, p in enumerate(PHOTOS, start=1):
-        assert_exists(p, f"foto {i}")
-
-    # -----------------------------------------------------
-    # BLOQUE 1 - APERTURA
-    # -----------------------------------------------------
-
-    logo_open = make_logo_block(
-        duration=OPEN_LOGO_DURATION,
-        fade=OPEN_LOGO_FADE,
+    clips.append(
+        CompositeVideoClip([
+            black_clip(OPEN_LOGO_ONLY_DURATION),
+            safe_text_clip(
+                LOGO_TEXT,
+                d=OPEN_LOGO_ONLY_DURATION,
+                font_size=56,
+                fade=0.0,
+            ),
+        ], size=(W, H)).with_duration(OPEN_LOGO_ONLY_DURATION)
     )
 
-    intro_blocks = []
-    for line in INTRO_LINES:
-        intro_blocks.append(
-            make_center_text_block(
-                text=line,
-                font_size=INTRO_FONT_SIZE,
-                duration=INTRO_LINE_DURATION,
-                fade=INTRO_LINE_FADE,
+    clips.append(
+        CompositeVideoClip([
+            black_clip(OPEN_LOGO_FADE_DURATION),
+            safe_text_clip(
+                LOGO_TEXT,
+                d=OPEN_LOGO_FADE_DURATION,
+                font_size=56,
+                fade=OPEN_LOGO_FADE_DURATION,
+            ),
+        ], size=(W, H)).with_duration(OPEN_LOGO_FADE_DURATION)
+    )
+
+    for i, line in enumerate(INTRO_LINES):
+        clips.append(
+            CompositeVideoClip([
+                black_clip(INTRO_TEXT_DURATION),
+                safe_text_clip(
+                    line,
+                    d=INTRO_TEXT_DURATION,
+                    font_size=42,
+                    fade=INTRO_TEXT_FADE,
+                ),
+            ], size=(W, H)).with_duration(INTRO_TEXT_DURATION)
+        )
+        if i < len(INTRO_LINES) - 1:
+            clips.append(black_clip(INTRO_GAP_DURATION))
+
+    clips.append(black_clip(TRANSITION_BLACK_DURATION))
+
+    # movimientos suaves diferentes por foto
+    movement_plan = [
+        {"zoom_mode": "in",  "move_x":  18, "move_y":   0},
+        {"zoom_mode": "out", "move_x": -18, "move_y":   0},
+        {"zoom_mode": "in",  "move_x":   0, "move_y": -14},
+        {"zoom_mode": "in",  "move_x":   0, "move_y":  14},
+        {"zoom_mode": "out", "move_x":  16, "move_y":   0},
+        {"zoom_mode": "in",  "move_x": -16, "move_y":   0},
+    ]
+
+    for i, p in enumerate(photos):
+        phrase = PHOTO_PHRASES.get(i)
+        duration = PHOTO_DURATIONS[i]
+        movement = movement_plan[i]
+
+        clips.append(
+            build_photo_clip(
+                p,
+                duration=duration,
+                phrase=phrase,
+                zoom_mode=movement["zoom_mode"],
+                move_x=movement["move_x"],
+                move_y=movement["move_y"],
             )
         )
-        if INTRO_GAP > 0:
-            intro_blocks.append(make_black_clip(INTRO_GAP))
+        clips.append(black_clip(2.0))
 
-    pre_photos_black = make_black_clip(PRE_PHOTOS_BLACK)
-
-    # -----------------------------------------------------
-    # BLOQUE 2 - FOTOS
-    # -----------------------------------------------------
-
-    photo_blocks = []
-    photo_text_map = {
-        1: None,
-        2: PHOTO_LINES[0],
-        3: None,
-        4: PHOTO_LINES[1],
-        5: None,
-        6: PHOTO_LINES[2],
-    }
-
-    for index, photo in enumerate(PHOTOS, start=1):
-        photo_blocks.append(
-            make_photo_block(
-                photo_path=photo,
-                duration=PHOTO_DURATION,
-                overlay_text=photo_text_map[index],
-            )
-        )
-
-    # -----------------------------------------------------
-    # BLOQUE 3 - FINAL EMOCIONAL
-    # -----------------------------------------------------
-
-    final_blocks = []
-
-    final_blocks.append(
-        make_center_text_block(
-            text=FINAL_LINES[0],
-            font_size=FINAL_FONT_SIZE,
-            duration=FINAL_LINE_DURATION,
-            fade=FINAL_LINE_FADE,
-        )
-    )
-    final_blocks.append(make_black_clip(FINAL_GAP))
-    final_blocks.append(
-        make_center_text_block(
-            text=FINAL_LINES[1],
-            font_size=FINAL_FONT_SIZE,
-            duration=FINAL_LINE_DURATION,
-            fade=FINAL_LINE_FADE,
-        )
-    )
-    final_blocks.append(make_black_clip(FINAL_BLACK_BEFORE_LOGO))
-
-    # -----------------------------------------------------
-    # BLOQUE 4 - LOGO FINAL
-    # -----------------------------------------------------
-
-    logo_final = make_logo_block(
-        duration=FINAL_LOGO_DURATION,
-        fade=FINAL_LOGO_FADE,
+    clips.append(
+        CompositeVideoClip([
+            black_clip(FINAL_LINE_1_DURATION),
+            safe_text_clip(
+                FINAL_LINE_1,
+                d=FINAL_LINE_1_DURATION,
+                font_size=42,
+                fade=FINAL_FADE,
+            ),
+        ], size=(W, H)).with_duration(FINAL_LINE_1_DURATION)
     )
 
-    # -----------------------------------------------------
-    # MONTAJE TOTAL DE VÍDEO
-    # -----------------------------------------------------
+    clips.append(black_clip(FINAL_GAP_DURATION))
 
-    clips = [logo_open] + intro_blocks + [pre_photos_black] + photo_blocks + final_blocks + [logo_final]
-    final_video = concatenate_videoclips(clips, method="compose").with_fps(FPS)
-
-    total_duration = final_video.duration
-
-    # =====================================================
-    # AUDIO
-    # =====================================================
-
-    # Corazón desde segundo 0
-    heart = AudioFileClip(str(HEART_PATH))
-    heart = loop_audio_to_duration(heart, total_duration)
-    heart = heart.with_volume_scaled(2.4)
-
-    # El corazón desaparece cuando va a entrar la música
-    music_start = logo_open.duration + sum(c.duration for c in intro_blocks)
-    heart_end = music_start + HEART_FADE_OUT
-    heart = heart.with_effects(
-        [
-            afx.AudioFadeOut(HEART_FADE_OUT),
-        ]
+    clips.append(
+        CompositeVideoClip([
+            black_clip(FINAL_LINE_2_DURATION),
+            safe_text_clip(
+                FINAL_LINE_2,
+                d=FINAL_LINE_2_DURATION,
+                font_size=42,
+                fade=FINAL_FADE,
+            ),
+        ], size=(W, H)).with_duration(FINAL_LINE_2_DURATION)
     )
 
-    # Recorte exacto del corazón hasta su desaparición
-    if heart_end < total_duration:
-        heart = heart.subclipped(0, heart_end)
+    clips.append(black_clip(2.0))
 
-    # Música desde transición a fotos, hasta el final
-    music_base = AudioFileClip(str(MUSIC_PATH))
-    music_needed_duration = max(total_duration - music_start, 0.1)
-    music = loop_audio_to_duration(music_base, music_needed_duration)
-    music = music.with_start(music_start)
-    music = music.with_effects(
-        [
-            afx.AudioFadeIn(MUSIC_FADE_IN),
-            afx.AudioFadeOut(MUSIC_FADE_OUT),
-        ]
+    clips.append(
+        CompositeVideoClip([
+            black_clip(FINAL_LOGO_DURATION),
+            safe_text_clip(
+                LOGO_TEXT,
+                d=FINAL_LOGO_DURATION,
+                font_size=56,
+                fade=FINAL_FADE,
+            ),
+        ], size=(W, H)).with_duration(FINAL_LOGO_DURATION)
     )
 
-    final_audio = CompositeAudioClip([heart, music])
-    final_video = final_video.with_audio(final_audio)
+    clips.append(black_clip(FINAL_BLACK_HOLD_DURATION))
 
-    return final_video
-
+    return concatenate_videoclips(clips, method="compose").with_fps(FPS)
 
 # =========================================================
-# RENDER
+# AUDIO
+# =========================================================
+
+def loop_audio(audio_clip, duration):
+    parts = []
+    remaining = duration
+
+    while remaining > 0:
+        take = min(audio_clip.duration, remaining)
+        parts.append(audio_clip.subclipped(0, take))
+        remaining -= take
+
+    return concatenate_audioclips(parts)
+
+def build_audio(duration, music_path, heart_path):
+    heart_src = AudioFileClip(str(heart_path))
+    music_src = AudioFileClip(str(music_path))
+
+    intro_logo_total = OPEN_LOGO_ONLY_DURATION + OPEN_LOGO_FADE_DURATION
+    intro_texts_total = (
+        len(INTRO_LINES) * INTRO_TEXT_DURATION
+        + (len(INTRO_LINES) - 1) * INTRO_GAP_DURATION
+    )
+
+    transition_start = intro_logo_total + intro_texts_total
+
+    heart_start = OPEN_LOGO_ONLY_DURATION
+    heart_end = transition_start + 2.0
+
+    heart_duration = heart_end - heart_start
+    heart = loop_audio(heart_src, heart_duration).with_start(heart_start).with_volume_scaled(HEART_VOLUME)
+    heart = heart.with_effects([
+        afx.AudioFadeOut(HEART_FADE_OUT),
+    ])
+
+    music_start = transition_start + 3.0
+    music_duration = max(0.1, duration - music_start)
+
+    music = loop_audio(music_src, music_duration).with_start(music_start)
+    music = music.with_effects([
+        afx.AudioFadeIn(MUSIC_FADE_IN),
+        afx.AudioFadeOut(MUSIC_FADE_OUT),
+    ]).with_volume_scaled(MUSIC_VOLUME)
+
+    final_lift_start = max(music_start, duration - 15.0)
+    final_lift_duration = max(0.1, duration - final_lift_start)
+
+    music_lift = loop_audio(music_src, final_lift_duration).with_start(final_lift_start)
+    music_lift = music_lift.with_effects([
+        afx.AudioFadeIn(3.0),
+        afx.AudioFadeOut(MUSIC_FADE_OUT),
+    ]).with_volume_scaled(MUSIC_FINAL_VOLUME - MUSIC_VOLUME)
+
+    return CompositeAudioClip([heart, music, music_lift]).with_duration(duration)
+
+# =========================================================
+# MAIN
 # =========================================================
 
 def main():
-    output_name = f"eterna_final_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-    output_path = OUTPUT_DIR / output_name
+    photos, music_path, heart_path = resolve_paths()
 
-    print("==============================================")
-    print("ETERNA - RENDER FINAL")
-    print("==============================================")
-    print(f"Base dir: {BASE_DIR}")
-    print(f"Output:   {output_path}")
-    print("")
+    video = build_video(photos)
+    audio = build_audio(video.duration, music_path, heart_path)
+    final = video.with_audio(audio)
 
-    video = build_video()
+    out = OUTPUT_DIR / f"eterna_{datetime.now().strftime('%H%M%S')}.mp4"
 
-    print(f"Duración total: {video.duration:.2f}s")
-    print("Renderizando...")
-
-    video.write_videofile(
-        str(output_path),
+    final.write_videofile(
+        str(out),
         fps=FPS,
         codec="libx264",
         audio_codec="aac",
         bitrate=VIDEO_BITRATE,
         audio_bitrate=AUDIO_BITRATE,
-        preset="medium",
+        preset="ultrafast",
         threads=4,
     )
 
-    print("")
-    print("✅ Render terminado")
-    print(f"Archivo final: {output_path}")
+    final.close()
+    video.close()
+    audio.close()
 
+    print(f"VIDEO CREADO: {out}")
 
 if __name__ == "__main__":
     main()
