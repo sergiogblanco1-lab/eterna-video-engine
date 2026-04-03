@@ -1,4 +1,6 @@
 print("🔥 GUARDADO REAL VIDEO ENGINE 🔥")
+print("🔥 ASYNC VERSION CARGADA 🔥")
+
 from datetime import datetime
 from pathlib import Path
 import gc
@@ -6,6 +8,8 @@ import os
 import shutil
 import sys
 import traceback
+import threading
+import time
 
 import numpy as np
 import requests
@@ -59,6 +63,40 @@ VIDEO_BITRATE = "1600k"
 AUDIO_BITRATE = "96k"
 
 VIDEO_ENGINE_PUBLIC_URL = os.getenv("VIDEO_ENGINE_PUBLIC_URL", "").strip().rstrip("/")
+VIDEO_READY_CALLBACK_URL = os.getenv("VIDEO_READY_CALLBACK_URL", "").strip().rstrip("/")
+VIDEO_READY_CALLBACK_SECRET = os.getenv("VIDEO_READY_CALLBACK_SECRET", "").strip()
+
+DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", "180"))
+DOWNLOAD_RETRIES = int(os.getenv("DOWNLOAD_RETRIES", "4"))
+DOWNLOAD_RETRY_SLEEP = float(os.getenv("DOWNLOAD_RETRY_SLEEP", "2.5"))
+
+CALLBACK_TIMEOUT = int(os.getenv("CALLBACK_TIMEOUT", "30"))
+CALLBACK_RETRIES = int(os.getenv("CALLBACK_RETRIES", "4"))
+CALLBACK_RETRY_SLEEP = float(os.getenv("CALLBACK_RETRY_SLEEP", "3"))
+
+MAX_ACTIVE_RENDER_THREADS = int(os.getenv("MAX_ACTIVE_RENDER_THREADS", "2"))
+
+
+# =========================================================
+# ESTADO DE JOBS
+# =========================================================
+
+RENDER_JOBS = {}
+RENDER_LOCK = threading.Lock()
+RENDER_SEMAPHORE = threading.Semaphore(MAX_ACTIVE_RENDER_THREADS)
+
+
+def set_job_status(order_id: str, **fields):
+    with RENDER_LOCK:
+        current = RENDER_JOBS.get(order_id, {})
+        current.update(fields)
+        current["updated_at"] = datetime.utcnow().isoformat()
+        RENDER_JOBS[order_id] = current
+
+
+def get_job_status(order_id: str):
+    with RENDER_LOCK:
+        return dict(RENDER_JOBS.get(order_id, {}))
 
 
 # =========================================================
@@ -687,20 +725,46 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
 # DESCARGA DE FOTOS
 # =========================================================
 
-def download_file(url: str, dest: Path):
-    print("⬇️ Descargando:", url)
-    sys.stdout.flush()
+def download_file_with_retry(url: str, dest: Path, retries: int = DOWNLOAD_RETRIES):
+    last_error = None
 
-    resp = requests.get(url, stream=True, timeout=120)
-    resp.raise_for_status()
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"⬇️ Descargando intento {attempt}/{retries}: {url}")
+            sys.stdout.flush()
 
-    with open(dest, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                f.write(chunk)
+            with requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT) as resp:
+                resp.raise_for_status()
 
-    print("✅ Descargada en:", dest)
-    sys.stdout.flush()
+                with open(dest, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+
+            if not dest.exists() or dest.stat().st_size == 0:
+                raise Exception(f"Archivo descargado vacío: {dest}")
+
+            print("✅ Descargada en:", dest)
+            print("📁 SIZE:", dest.stat().st_size)
+            sys.stdout.flush()
+            return
+
+        except Exception as e:
+            last_error = e
+            print(f"⚠️ Error descargando {url} en intento {attempt}: {e}")
+            traceback.print_exc()
+            sys.stdout.flush()
+
+            if dest.exists():
+                try:
+                    dest.unlink()
+                except Exception:
+                    pass
+
+            if attempt < retries:
+                time.sleep(DOWNLOAD_RETRY_SLEEP)
+
+    raise Exception(f"No se pudo descargar tras {retries} intentos: {url}. Último error: {last_error}")
 
 
 def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
@@ -716,9 +780,9 @@ def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
 
     for idx, url in enumerate(photo_urls, start=1):
         dest = order_input_dir / f"PHOTO{idx}.jpg"
-        print(f"⬇️ Descargando foto {idx}: {url}")
+        print(f"⬇️ Preparando descarga foto {idx}: {url}")
         sys.stdout.flush()
-        download_file(url, dest)
+        download_file_with_retry(url, dest)
         local_paths.append(str(dest))
 
     print("🔥 prepare_order_inputs OK:", local_paths)
@@ -734,6 +798,157 @@ def build_public_video_url(request: Request, filename: str) -> str:
     return f"{base}/video/{filename}"
 
 
+def build_public_video_url_from_filename(filename: str) -> str:
+    if VIDEO_ENGINE_PUBLIC_URL:
+        return f"{VIDEO_ENGINE_PUBLIC_URL}/video/{filename}"
+    return f"/video/{filename}"
+
+
+# =========================================================
+# CALLBACK AL BACKEND
+# =========================================================
+
+def notify_backend_video_ready(order_id: str, video_url: str):
+    if not VIDEO_READY_CALLBACK_URL:
+        print("ℹ️ VIDEO_READY_CALLBACK_URL no configurada. No se envía callback.")
+        sys.stdout.flush()
+        return True
+
+    payload = {
+        "order_id": order_id,
+        "video_url": video_url,
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if VIDEO_READY_CALLBACK_SECRET:
+        headers["X-Video-Engine-Secret"] = VIDEO_READY_CALLBACK_SECRET
+
+    last_error = None
+
+    for attempt in range(1, CALLBACK_RETRIES + 1):
+        try:
+            print(f"📡 Callback intento {attempt}/{CALLBACK_RETRIES} -> {VIDEO_READY_CALLBACK_URL}")
+            print("📡 Payload:", payload)
+            sys.stdout.flush()
+
+            response = requests.post(
+                VIDEO_READY_CALLBACK_URL,
+                json=payload,
+                headers=headers,
+                timeout=CALLBACK_TIMEOUT,
+            )
+
+            print("📡 Callback status:", response.status_code)
+            print("📡 Callback response:", response.text)
+            sys.stdout.flush()
+
+            response.raise_for_status()
+            return True
+
+        except Exception as e:
+            last_error = e
+            print(f"⚠️ Error callback intento {attempt}: {e}")
+            traceback.print_exc()
+            sys.stdout.flush()
+
+            if attempt < CALLBACK_RETRIES:
+                time.sleep(CALLBACK_RETRY_SLEEP)
+
+    print(f"❌ Callback fallido para {order_id}: {last_error}")
+    sys.stdout.flush()
+    return False
+
+
+# =========================================================
+# PROCESO ASYNC
+# =========================================================
+
+def process_render_job(order_id: str, photos: list[str], phrases: list[str]):
+    with RENDER_SEMAPHORE:
+        try:
+            set_job_status(
+                order_id,
+                status="processing",
+                order_id=order_id,
+                started_at=datetime.utcnow().isoformat(),
+                error=None,
+                video_url=None,
+            )
+
+            print("🚀 BACKGROUND START:", order_id)
+            print("🔥 payload photos:", photos)
+            print("🔥 payload phrases:", phrases)
+            sys.stdout.flush()
+
+            output_path = OUTPUT_DIR / f"{order_id}.mp4"
+
+            if output_path.exists():
+                try:
+                    output_path.unlink()
+                except Exception:
+                    pass
+
+            photo_paths = prepare_order_inputs(order_id, photos)
+            print("🔥 PHOTOS DESCARGADAS:", photo_paths)
+            sys.stdout.flush()
+
+            render_eterna_video(
+                photo_paths=photo_paths,
+                phrase_1=phrases[0],
+                phrase_2=phrases[1],
+                phrase_3=phrases[2],
+                output_path=str(output_path),
+            )
+
+            print("🔥 VIDEO GENERADO")
+            print("🔥 CHECK FILE EXISTS:", output_path)
+            print("🔥 EXISTS:", output_path.exists())
+            sys.stdout.flush()
+
+            if not output_path.exists():
+                raise Exception("video_not_generated")
+
+            if output_path.stat().st_size == 0:
+                raise Exception("video_generated_but_empty")
+
+            video_url = build_public_video_url_from_filename(output_path.name)
+
+            set_job_status(
+                order_id,
+                status="done",
+                order_id=order_id,
+                finished_at=datetime.utcnow().isoformat(),
+                video_url=video_url,
+                output_path=str(output_path),
+                file_size=output_path.stat().st_size,
+                callback_sent=False,
+                error=None,
+            )
+
+            print("✅ VIDEO LISTO:", video_url)
+            sys.stdout.flush()
+
+            callback_ok = notify_backend_video_ready(order_id, video_url)
+
+            set_job_status(
+                order_id,
+                callback_sent=callback_ok,
+            )
+
+        except Exception as e:
+            print("❌ ERROR BACKGROUND:", str(e))
+            traceback.print_exc()
+            sys.stdout.flush()
+
+            set_job_status(
+                order_id,
+                status="error",
+                order_id=order_id,
+                finished_at=datetime.utcnow().isoformat(),
+                error=str(e),
+            )
+
+
 # =========================================================
 # ROUTES
 # =========================================================
@@ -741,6 +956,14 @@ def build_public_video_url(request: Request, filename: str) -> str:
 @app.get("/")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/render-status/{order_id}")
+def render_status(order_id: str):
+    job = get_job_status(order_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Trabajo no encontrado")
+    return job
 
 
 @app.get("/video/{filename}")
@@ -760,12 +983,14 @@ def get_rendered_video(filename: str):
 
 @app.post("/render")
 def render_video(data: RenderRequest, request: Request):
-    print("🎬 Generando video para:", data.order_id)
+    print("🎬 REQUEST RECIBIDA:", data.order_id)
     print("🔥 payload photos:", data.photos)
     print("🔥 payload phrases:", data.phrases)
     sys.stdout.flush()
 
-    if not data.order_id.strip():
+    order_id = (data.order_id or "").strip()
+
+    if not order_id:
         raise HTTPException(status_code=400, detail="order_id vacío")
 
     if len(data.photos) != 6:
@@ -774,62 +999,44 @@ def render_video(data: RenderRequest, request: Request):
     if len(data.phrases) != 3:
         raise HTTPException(status_code=400, detail="Se necesitan 3 frases")
 
-    order_id = data.order_id.strip()
-    output_path = OUTPUT_DIR / f"{order_id}.mp4"
+    existing = get_job_status(order_id)
+    if existing and existing.get("status") in {"queued", "processing"}:
+        return JSONResponse({
+            "status": "accepted",
+            "order_id": order_id,
+            "message": "render_already_in_progress",
+        })
 
-    try:
-        print("🔥 START RENDER ENDPOINT")
-        sys.stdout.flush()
-
-        photo_paths = prepare_order_inputs(order_id, data.photos)
-        print("🔥 PHOTOS DESCARGADAS")
-        sys.stdout.flush()
-
-        render_eterna_video(
-            photo_paths=photo_paths,
-            phrase_1=data.phrases[0],
-            phrase_2=data.phrases[1],
-            phrase_3=data.phrases[2],
-            output_path=str(output_path),
-        )
-
-        print("🔥 VIDEO GENERADO")
-        print("🔥 CHECK FILE EXISTS:", output_path)
-        print("🔥 EXISTS:", output_path.exists())
-        sys.stdout.flush()
-
-        if not output_path.exists():
-            print("❌ ARCHIVO NO EXISTE → el render se ha roto antes de terminar")
-            sys.stdout.flush()
-            return JSONResponse({
-                "status": "error",
-                "reason": "video_not_generated",
-                "order_id": order_id,
-            })
-
-        video_url = build_public_video_url(request, output_path.name)
-        print("🔥 video_url:", video_url)
-        sys.stdout.flush()
-
+    if existing and existing.get("status") == "done" and existing.get("video_url"):
         return JSONResponse({
             "status": "done",
             "order_id": order_id,
-            "video_url": video_url,
+            "video_url": existing.get("video_url"),
         })
 
-    except Exception as e:
-        print("❌ ERROR RENDER:", str(e))
-        traceback.print_exc()
-        sys.stdout.flush()
+    set_job_status(
+        order_id,
+        status="queued",
+        order_id=order_id,
+        received_at=datetime.utcnow().isoformat(),
+        photos_count=len(data.photos),
+        phrases_count=len(data.phrases),
+        video_url=None,
+        error=None,
+    )
 
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "order_id": order_id,
-                "error": str(e),
-            },
-        )
+    thread = threading.Thread(
+        target=process_render_job,
+        args=(order_id, list(data.photos), list(data.phrases)),
+        daemon=True,
+    )
+    thread.start()
+
+    return JSONResponse({
+        "status": "accepted",
+        "order_id": order_id,
+        "status_url": f"/render-status/{order_id}",
+    })
 
 
 # =========================================================
