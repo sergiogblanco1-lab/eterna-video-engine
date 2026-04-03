@@ -624,12 +624,27 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
 
         photos = [Path(p) for p in photo_paths]
 
+        print("🔥 START render_eterna_video")
+        print("🔥 photos:", photos)
+        print("🔥 music_path:", music_path)
+        print("🔥 heart_path:", heart_path)
+        print("🔥 logo_inicio_path:", logo_inicio_path)
+        print("🔥 logo_final_path:", logo_final_path)
+
         video = build_video(photos, logo_inicio_path, logo_final_path)
+        print("🔥 build_video OK. duration:", video.duration)
+
         audio = build_audio(video.duration, music_path, heart_path)
+        print("🔥 build_audio OK")
+
         final = video.with_audio(audio)
+        print("🔥 final with audio OK")
 
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
+
+        print("🎬 EMPEZANDO RENDER...")
+        print("📁 OUTPUT PATH:", out)
 
         final.write_videofile(
             str(out),
@@ -639,8 +654,12 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
             bitrate=VIDEO_BITRATE,
             audio_bitrate=AUDIO_BITRATE,
             preset="ultrafast",
-            threads=4,
+            threads=2,
         )
+
+        print("✅ TERMINÓ write_videofile")
+        print("📁 EXISTE ARCHIVO:", out.exists())
+        print("📁 SIZE:", out.stat().st_size if out.exists() else "NO FILE")
 
         print(f"✅ VIDEO CREADO: {out}")
         return str(out)
@@ -661,6 +680,7 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
 # =========================================================
 
 def download_file(url: str, dest: Path):
+    print("⬇️ Descargando:", url)
     resp = requests.get(url, stream=True, timeout=120)
     resp.raise_for_status()
 
@@ -668,6 +688,8 @@ def download_file(url: str, dest: Path):
         for chunk in resp.iter_content(chunk_size=1024 * 1024):
             if chunk:
                 f.write(chunk)
+
+    print("✅ Descargada en:", dest)
 
 
 def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
@@ -687,6 +709,7 @@ def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
         download_file(url, dest)
         local_paths.append(str(dest))
 
+    print("🔥 prepare_order_inputs OK:", local_paths)
     return local_paths
 
 
@@ -724,6 +747,8 @@ def get_rendered_video(filename: str):
 @app.post("/render")
 def render_video(data: RenderRequest, request: Request):
     print("🎬 Generando video para:", data.order_id)
+    print("🔥 payload photos:", data.photos)
+    print("🔥 payload phrases:", data.phrases)
 
     if not data.order_id.strip():
         raise HTTPException(status_code=400, detail="order_id vacío")
@@ -738,7 +763,10 @@ def render_video(data: RenderRequest, request: Request):
     output_path = OUTPUT_DIR / f"{order_id}.mp4"
 
     try:
+        print("🔥 START RENDER ENDPOINT")
+
         photo_paths = prepare_order_inputs(order_id, data.photos)
+        print("🔥 PHOTOS DESCARGADAS")
 
         render_eterna_video(
             photo_paths=photo_paths,
@@ -748,10 +776,13 @@ def render_video(data: RenderRequest, request: Request):
             output_path=str(output_path),
         )
 
+        print("🔥 VIDEO GENERADO")
+
         if not output_path.exists():
             raise RuntimeError("El render terminó pero no se encontró el archivo final")
 
         video_url = build_public_video_url(request, output_path.name)
+        print("🔥 video_url:", video_url)
 
         return JSONResponse({
             "status": "done",
