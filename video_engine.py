@@ -3,7 +3,7 @@ from pathlib import Path
 import gc
 import os
 import shutil
-import uuid
+import traceback
 
 import numpy as np
 import requests
@@ -62,16 +62,20 @@ VIDEO_ENGINE_PUBLIC_URL = os.getenv("VIDEO_ENGINE_PUBLIC_URL", "").strip().rstri
 # DURACIONES
 # =========================================================
 
+# LOGO INICIAL
 OPEN_LOGO_ONLY_DURATION = 2.0
 OPEN_LOGO_FADE_DURATION = 3.0
 OPEN_LOGO_FADE_OUT = 1.8
 
+# INTRO
 INTRO_TEXT_DURATION = 4.8
 INTRO_GAP_DURATION = 3.0
 INTRO_TEXT_FADE = 1.4
 
+# NEGRO DESPUÉS DE "ES MAGIA."
 TRANSITION_BLACK_DURATION = 4.0
 
+# FOTOS
 PHOTO_DURATION = 8.2
 PHOTO_DURATION_FIRST = 12.2
 PHOTO_DURATION_LONG = 9.8
@@ -84,10 +88,12 @@ PHOTO_ZOOM_IN_END = 1.07
 PHOTO_ZOOM_OUT_START = 1.05
 PHOTO_ZOOM_OUT_END = 1.00
 
+# FRASES EN FOTOS
 PHRASE_DURATION = 5.0
 PHRASE_FADE = 1.0
 PHRASE_START_DELAY = 1.2
 
+# FINAL
 FINAL_BLACK_BEFORE_LOGO = 3.8
 FINAL_LOGO_DURATION = 5.5
 FINAL_BLACK_HOLD_DURATION = 8.5
@@ -95,6 +101,7 @@ FINAL_FADE = 1.8
 FINAL_LOGO_FADE_IN = 1.8
 FINAL_LOGO_FADE_OUT = 1.8
 
+# AUDIO
 HEART_VOLUME = 3.0
 HEART_FADE_OUT = 2.4
 
@@ -594,7 +601,7 @@ def build_audio(duration, music_path, heart_path):
 
 
 # =========================================================
-# RENDER REUTILIZABLE
+# RENDER REUTILIZABLE PARA MAIN
 # =========================================================
 
 def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
@@ -758,13 +765,13 @@ def render_video(data: RenderRequest, request: Request):
 
     except Exception as e:
         print("❌ ERROR RENDER:", str(e))
-        traceback_text = str(e)
+        traceback.print_exc()
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
                 "order_id": order_id,
-                "error": traceback_text,
+                "error": str(e),
             },
         )
 
@@ -774,7 +781,7 @@ def render_video(data: RenderRequest, request: Request):
 # =========================================================
 
 def main():
-    photos, _, _, logo_inicio, logo_final = resolve_paths()
+    photos, _, _, _, _ = resolve_paths()
     output_name = f"eterna_local_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
     output_path = OUTPUT_DIR / output_name
 
