@@ -86,7 +86,7 @@ RENDER_LOCK = threading.Lock()
 RENDER_SEMAPHORE = threading.Semaphore(MAX_ACTIVE_RENDER_THREADS)
 
 
-def set_job_status(order_id: str, **fields):
+def set_job_status(order_id,"processing"):
     with RENDER_LOCK:
         current = RENDER_JOBS.get(order_id, {})
         current.update(fields)
