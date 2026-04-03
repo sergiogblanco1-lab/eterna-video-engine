@@ -16,6 +16,7 @@ from moviepy import (
     AudioFileClip,
     ColorClip,
     CompositeAudioClip,
+    CompositeVideoClip,
     ImageClip,
     TextClip,
     concatenate_audioclips,
