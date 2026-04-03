@@ -1,4 +1,3 @@
-# TEST
 from datetime import datetime
 from pathlib import Path
 import gc
@@ -636,6 +635,9 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
 
+        print("🎬 EMPEZANDO RENDER...")
+        print("📁 OUTPUT PATH:", out)
+
         final.write_videofile(
             str(out),
             fps=FPS,
@@ -646,6 +648,10 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
             preset="ultrafast",
             threads=4,
         )
+
+        print("✅ TERMINÓ write_videofile")
+        print("📁 EXISTE ARCHIVO:", out.exists())
+        print("📁 SIZE:", out.stat().st_size if out.exists() else "NO FILE")
 
         print(f"✅ VIDEO CREADO: {out}")
         return str(out)
