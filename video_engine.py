@@ -1,33 +1,15 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-app = FastAPI()
-
-class RenderRequest(BaseModel):
-    order_id: str
-    photos: list[str]
-    phrases: list[str]
-
-
-    @app.get("/")
-def health():
-    return {"status": "ok"}
-
- @app.post("/render")
-def render_video(data: RenderRequest):
-    print("🎬 Generando video para:", data.order_id)
-
-    # Aquí luego meteremos MoviePy
-    return {
-        "status": "rendering_started",
-        "order_id": data.order_id
-    }
-
 from datetime import datetime
 from pathlib import Path
 import gc
-import numpy as np
+import os
+import shutil
+import uuid
 
+import numpy as np
+import requests
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 from PIL import Image, ImageOps
 from moviepy import (
     AudioFileClip,
@@ -42,6 +24,15 @@ from moviepy import (
     afx,
 )
 
+app = FastAPI(title="ETERNA VIDEO ENGINE")
+
+
+class RenderRequest(BaseModel):
+    order_id: str
+    photos: list[str]
+    phrases: list[str]
+
+
 # =========================================================
 # CONFIG
 # =========================================================
@@ -52,34 +43,35 @@ FPS = 20
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "renders"
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 TEMP_DIR = BASE_DIR / "temp_fixed"
-TEMP_DIR.mkdir(exist_ok=True)
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+INPUTS_DIR = BASE_DIR / "inputs"
+INPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 ASSETS_DIR = BASE_DIR / "photos_logo"
 
 VIDEO_BITRATE = "1600k"
 AUDIO_BITRATE = "96k"
 
+VIDEO_ENGINE_PUBLIC_URL = os.getenv("VIDEO_ENGINE_PUBLIC_URL", "").strip().rstrip("/")
+
 # =========================================================
 # DURACIONES
 # =========================================================
 
-# LOGO INICIAL
 OPEN_LOGO_ONLY_DURATION = 2.0
 OPEN_LOGO_FADE_DURATION = 3.0
 OPEN_LOGO_FADE_OUT = 1.8
 
-# INTRO
 INTRO_TEXT_DURATION = 4.8
 INTRO_GAP_DURATION = 3.0
 INTRO_TEXT_FADE = 1.4
 
-# NEGRO DESPUÉS DE "ES MAGIA."
 TRANSITION_BLACK_DURATION = 4.0
 
-# FOTOS
 PHOTO_DURATION = 8.2
 PHOTO_DURATION_FIRST = 12.2
 PHOTO_DURATION_LONG = 9.8
@@ -92,12 +84,10 @@ PHOTO_ZOOM_IN_END = 1.07
 PHOTO_ZOOM_OUT_START = 1.05
 PHOTO_ZOOM_OUT_END = 1.00
 
-# FRASES EN FOTOS
 PHRASE_DURATION = 5.0
 PHRASE_FADE = 1.0
 PHRASE_START_DELAY = 1.2
 
-# FINAL
 FINAL_BLACK_BEFORE_LOGO = 3.8
 FINAL_LOGO_DURATION = 5.5
 FINAL_BLACK_HOLD_DURATION = 8.5
@@ -105,7 +95,6 @@ FINAL_FADE = 1.8
 FINAL_LOGO_FADE_IN = 1.8
 FINAL_LOGO_FADE_OUT = 1.8
 
-# AUDIO
 HEART_VOLUME = 3.0
 HEART_FADE_OUT = 2.4
 
@@ -140,6 +129,7 @@ def find_inputs_dir():
             return p
     raise FileNotFoundError("No encuentro carpeta inputs")
 
+
 def find_audio(filename: str) -> Path:
     for p in [
         BASE_DIR / filename,
@@ -150,12 +140,14 @@ def find_audio(filename: str) -> Path:
             return p
     raise FileNotFoundError(f"No encuentro {filename}")
 
+
 def find_file_flexible(folder: Path, keyword: str) -> Path:
     keyword = keyword.lower().strip()
     for f in folder.glob("*"):
         if keyword in f.name.lower():
             return f
     raise FileNotFoundError(f"No se encontró archivo con '{keyword}' en {folder}")
+
 
 def get_photos(inputs_dir: Path):
     exts = [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]
@@ -206,6 +198,7 @@ def get_photos(inputs_dir: Path):
 
     return all_photos[:6]
 
+
 def resolve_paths():
     inputs_dir = find_inputs_dir()
     photos = get_photos(inputs_dir)
@@ -226,12 +219,14 @@ def resolve_paths():
 
     return photos, music, heart, logo_inicio, logo_final
 
+
 # =========================================================
 # HELPERS VISUALES
 # =========================================================
 
 def black_clip(duration):
     return ColorClip((W, H), color=(0, 0, 0)).with_duration(duration)
+
 
 def base_text_clip(
     text,
@@ -255,6 +250,7 @@ def base_text_clip(
         interline=6,
         margin=(0, 18),
     ).with_duration(duration)
+
 
 # =========================================================
 # TEXTO INTRO (LATIDO LENTO)
@@ -300,6 +296,7 @@ def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0
         ])
     )
 
+
 # =========================================================
 # TEXTO FOTOS (SIN LATIDO)
 # =========================================================
@@ -326,6 +323,7 @@ def photo_phrase_text(text, duration, font_size=38, fade=1.0):
         ])
     )
 
+
 # =========================================================
 # LOGOS
 # =========================================================
@@ -341,6 +339,7 @@ def process_logo(logo_path: Path, duration: float, max_w_ratio: float, max_h_rat
 
     return logo.with_position(("center", "center"))
 
+
 def logo_inicio_clip(duration, logo_inicio_path: Path):
     return (
         process_logo(logo_inicio_path, duration, 0.85, 0.30)
@@ -348,6 +347,7 @@ def logo_inicio_clip(duration, logo_inicio_path: Path):
             vfx.FadeOut(OPEN_LOGO_FADE_OUT)
         ])
     )
+
 
 def logo_final_clip(duration, logo_final_path: Path):
     return (
@@ -357,6 +357,7 @@ def logo_final_clip(duration, logo_final_path: Path):
             vfx.FadeOut(FINAL_LOGO_FADE_OUT),
         ])
     )
+
 
 # =========================================================
 # HELPERS DE IMAGEN
@@ -372,6 +373,7 @@ def normalize_image_to_temp(img_path: Path) -> Path:
 
     return out_path
 
+
 def fit_cover(img_path: Path):
     fixed_path = normalize_image_to_temp(Path(img_path))
     clip = ImageClip(str(fixed_path))
@@ -384,6 +386,7 @@ def fit_cover(img_path: Path):
         x_center=clip.w / 2,
         y_center=clip.h / 2,
     )
+
 
 # =========================================================
 # BLOQUE DE FOTO
@@ -450,6 +453,7 @@ def build_photo_clip(
 
     return CompositeVideoClip(layers, size=(W, H)).with_duration(duration)
 
+
 # =========================================================
 # BLOQUE VIDEO
 # =========================================================
@@ -457,9 +461,6 @@ def build_photo_clip(
 def build_video(photos, logo_inicio_path, logo_final_path):
     clips = []
 
-    # -----------------------------------------------------
-    # LOGO INICIAL
-    # -----------------------------------------------------
     clips.append(
         CompositeVideoClip([
             black_clip(OPEN_LOGO_ONLY_DURATION),
@@ -469,9 +470,6 @@ def build_video(photos, logo_inicio_path, logo_final_path):
 
     clips.append(black_clip(OPEN_LOGO_FADE_DURATION))
 
-    # -----------------------------------------------------
-    # INTRO FRASES
-    # -----------------------------------------------------
     for i, line in enumerate(INTRO_LINES):
         clips.append(
             CompositeVideoClip([
@@ -489,14 +487,8 @@ def build_video(photos, logo_inicio_path, logo_final_path):
         if i < len(INTRO_LINES) - 1:
             clips.append(black_clip(INTRO_GAP_DURATION))
 
-    # -----------------------------------------------------
-    # NEGRO DESPUÉS DE "ES MAGIA."
-    # -----------------------------------------------------
     clips.append(black_clip(TRANSITION_BLACK_DURATION))
 
-    # -----------------------------------------------------
-    # MOVIMIENTOS SUAVES DIFERENTES POR FOTO
-    # -----------------------------------------------------
     movement_plan = [
         {"zoom_mode": "in",  "move_x":  18, "move_y":   0},
         {"zoom_mode": "out", "move_x": -18, "move_y":   0},
@@ -506,9 +498,6 @@ def build_video(photos, logo_inicio_path, logo_final_path):
         {"zoom_mode": "in",  "move_x": -16, "move_y":   0},
     ]
 
-    # -----------------------------------------------------
-    # FOTOS
-    # -----------------------------------------------------
     for i, p in enumerate(photos):
         if i == 0:
             duration = PHOTO_DURATION_FIRST
@@ -536,9 +525,6 @@ def build_video(photos, logo_inicio_path, logo_final_path):
         if i == 4:
             clips.append(black_clip(1.25))
 
-    # -----------------------------------------------------
-    # FINAL
-    # -----------------------------------------------------
     clips.append(black_clip(FINAL_BLACK_BEFORE_LOGO))
 
     clips.append(
@@ -551,6 +537,7 @@ def build_video(photos, logo_inicio_path, logo_final_path):
     clips.append(black_clip(FINAL_BLACK_HOLD_DURATION))
 
     return concatenate_videoclips(clips, method="compose").with_fps(FPS)
+
 
 # =========================================================
 # AUDIO
@@ -566,6 +553,7 @@ def loop_audio(audio_clip, duration):
         remaining -= take
 
     return concatenate_audioclips(parts)
+
 
 def build_audio(duration, music_path, heart_path):
     heart_src = AudioFileClip(str(heart_path))
@@ -604,8 +592,9 @@ def build_audio(duration, music_path, heart_path):
 
     return CompositeAudioClip([heart_audio, music_audio]).with_duration(duration)
 
+
 # =========================================================
-# RENDER REUTILIZABLE PARA MAIN
+# RENDER REUTILIZABLE
 # =========================================================
 
 def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
@@ -650,7 +639,7 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
             threads=4,
         )
 
-        print(f"VIDEO CREADO: {out}")
+        print(f"✅ VIDEO CREADO: {out}")
         return str(out)
 
     finally:
@@ -663,7 +652,141 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
 
         gc.collect()
 
+
 # =========================================================
+# DESCARGA DE FOTOS
+# =========================================================
+
+def download_file(url: str, dest: Path):
+    resp = requests.get(url, stream=True, timeout=120)
+    resp.raise_for_status()
+
+    with open(dest, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
+
+
+def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
+    if len(photo_urls) != 6:
+        raise ValueError("Se necesitan exactamente 6 URLs de fotos")
+
+    order_input_dir = INPUTS_DIR / order_id
+    if order_input_dir.exists():
+        shutil.rmtree(order_input_dir)
+    order_input_dir.mkdir(parents=True, exist_ok=True)
+
+    local_paths = []
+
+    for idx, url in enumerate(photo_urls, start=1):
+        dest = order_input_dir / f"PHOTO{idx}.jpg"
+        print(f"⬇️ Descargando foto {idx}: {url}")
+        download_file(url, dest)
+        local_paths.append(str(dest))
+
+    return local_paths
+
+
+def build_public_video_url(request: Request, filename: str) -> str:
+    if VIDEO_ENGINE_PUBLIC_URL:
+        return f"{VIDEO_ENGINE_PUBLIC_URL}/video/{filename}"
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/video/{filename}"
+
+
+# =========================================================
+# ROUTES
+# =========================================================
+
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/video/{filename}")
+def get_rendered_video(filename: str):
+    safe_name = Path(filename).name
+    file_path = OUTPUT_DIR / safe_name
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Vídeo no encontrado")
+
+    return FileResponse(
+        str(file_path),
+        media_type="video/mp4",
+        filename=safe_name,
+    )
+
+
+@app.post("/render")
+def render_video(data: RenderRequest, request: Request):
+    print("🎬 Generando video para:", data.order_id)
+
+    if not data.order_id.strip():
+        raise HTTPException(status_code=400, detail="order_id vacío")
+
+    if len(data.photos) != 6:
+        raise HTTPException(status_code=400, detail="Se necesitan 6 fotos")
+
+    if len(data.phrases) != 3:
+        raise HTTPException(status_code=400, detail="Se necesitan 3 frases")
+
+    order_id = data.order_id.strip()
+    output_path = OUTPUT_DIR / f"{order_id}.mp4"
+
+    try:
+        photo_paths = prepare_order_inputs(order_id, data.photos)
+
+        render_eterna_video(
+            photo_paths=photo_paths,
+            phrase_1=data.phrases[0],
+            phrase_2=data.phrases[1],
+            phrase_3=data.phrases[2],
+            output_path=str(output_path),
+        )
+
+        if not output_path.exists():
+            raise RuntimeError("El render terminó pero no se encontró el archivo final")
+
+        video_url = build_public_video_url(request, output_path.name)
+
+        return JSONResponse({
+            "status": "done",
+            "order_id": order_id,
+            "video_url": video_url,
+        })
+
+    except Exception as e:
+        print("❌ ERROR RENDER:", str(e))
+        traceback_text = str(e)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "order_id": order_id,
+                "error": traceback_text,
+            },
+        )
+
+
+# =========================================================
+# MAIN LOCAL
+# =========================================================
+
+def main():
+    photos, _, _, logo_inicio, logo_final = resolve_paths()
+    output_name = f"eterna_local_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+    output_path = OUTPUT_DIR / output_name
+
+    render_eterna_video(
+        photo_paths=[str(p) for p in photos],
+        phrase_1="Y de pronto...\ntodo tuvo sentido.",
+        phrase_2="El tiempo pasa...\npero contigo todo se queda.",
+        phrase_3="Y aunque cambie la vida...\ntu siempre seras hogar.",
+        output_path=str(output_path),
+    )
+
+    print(f"🎉 Render local terminado: {output_path}")
 
 
 if __name__ == "__main__":
