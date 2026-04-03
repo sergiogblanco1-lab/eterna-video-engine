@@ -3,6 +3,7 @@ from pathlib import Path
 import gc
 import os
 import shutil
+import sys
 import traceback
 
 import numpy as np
@@ -630,21 +631,26 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
         print("🔥 heart_path:", heart_path)
         print("🔥 logo_inicio_path:", logo_inicio_path)
         print("🔥 logo_final_path:", logo_final_path)
+        sys.stdout.flush()
 
         video = build_video(photos, logo_inicio_path, logo_final_path)
         print("🔥 build_video OK. duration:", video.duration)
+        sys.stdout.flush()
 
         audio = build_audio(video.duration, music_path, heart_path)
         print("🔥 build_audio OK")
+        sys.stdout.flush()
 
         final = video.with_audio(audio)
         print("🔥 final with audio OK")
+        sys.stdout.flush()
 
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
 
         print("🎬 EMPEZANDO RENDER...")
         print("📁 OUTPUT PATH:", out)
+        sys.stdout.flush()
 
         final.write_videofile(
             str(out),
@@ -660,8 +666,9 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
         print("✅ TERMINÓ write_videofile")
         print("📁 EXISTE ARCHIVO:", out.exists())
         print("📁 SIZE:", out.stat().st_size if out.exists() else "NO FILE")
-
         print(f"✅ VIDEO CREADO: {out}")
+        sys.stdout.flush()
+
         return str(out)
 
     finally:
@@ -681,6 +688,8 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
 
 def download_file(url: str, dest: Path):
     print("⬇️ Descargando:", url)
+    sys.stdout.flush()
+
     resp = requests.get(url, stream=True, timeout=120)
     resp.raise_for_status()
 
@@ -690,6 +699,7 @@ def download_file(url: str, dest: Path):
                 f.write(chunk)
 
     print("✅ Descargada en:", dest)
+    sys.stdout.flush()
 
 
 def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
@@ -706,10 +716,13 @@ def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
     for idx, url in enumerate(photo_urls, start=1):
         dest = order_input_dir / f"PHOTO{idx}.jpg"
         print(f"⬇️ Descargando foto {idx}: {url}")
+        sys.stdout.flush()
         download_file(url, dest)
         local_paths.append(str(dest))
 
     print("🔥 prepare_order_inputs OK:", local_paths)
+    sys.stdout.flush()
+
     return local_paths
 
 
@@ -749,6 +762,7 @@ def render_video(data: RenderRequest, request: Request):
     print("🎬 Generando video para:", data.order_id)
     print("🔥 payload photos:", data.photos)
     print("🔥 payload phrases:", data.phrases)
+    sys.stdout.flush()
 
     if not data.order_id.strip():
         raise HTTPException(status_code=400, detail="order_id vacío")
@@ -764,9 +778,11 @@ def render_video(data: RenderRequest, request: Request):
 
     try:
         print("🔥 START RENDER ENDPOINT")
+        sys.stdout.flush()
 
         photo_paths = prepare_order_inputs(order_id, data.photos)
         print("🔥 PHOTOS DESCARGADAS")
+        sys.stdout.flush()
 
         render_eterna_video(
             photo_paths=photo_paths,
@@ -777,12 +793,22 @@ def render_video(data: RenderRequest, request: Request):
         )
 
         print("🔥 VIDEO GENERADO")
+        print("🔥 CHECK FILE EXISTS:", output_path)
+        print("🔥 EXISTS:", output_path.exists())
+        sys.stdout.flush()
 
         if not output_path.exists():
-            raise RuntimeError("El render terminó pero no se encontró el archivo final")
+            print("❌ ARCHIVO NO EXISTE → el render se ha roto antes de terminar")
+            sys.stdout.flush()
+            return JSONResponse({
+                "status": "error",
+                "reason": "video_not_generated",
+                "order_id": order_id,
+            })
 
         video_url = build_public_video_url(request, output_path.name)
         print("🔥 video_url:", video_url)
+        sys.stdout.flush()
 
         return JSONResponse({
             "status": "done",
@@ -793,6 +819,8 @@ def render_video(data: RenderRequest, request: Request):
     except Exception as e:
         print("❌ ERROR RENDER:", str(e))
         traceback.print_exc()
+        sys.stdout.flush()
+
         return JSONResponse(
             status_code=500,
             content={
