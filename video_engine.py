@@ -58,24 +58,21 @@ AUDIO_BITRATE = "96k"
 
 VIDEO_ENGINE_PUBLIC_URL = os.getenv("VIDEO_ENGINE_PUBLIC_URL", "").strip().rstrip("/")
 
+
 # =========================================================
 # DURACIONES
 # =========================================================
 
-# LOGO INICIAL
 OPEN_LOGO_ONLY_DURATION = 2.0
 OPEN_LOGO_FADE_DURATION = 3.0
 OPEN_LOGO_FADE_OUT = 1.8
 
-# INTRO
 INTRO_TEXT_DURATION = 4.8
 INTRO_GAP_DURATION = 3.0
 INTRO_TEXT_FADE = 1.4
 
-# NEGRO DESPUÉS DE "ES MAGIA."
 TRANSITION_BLACK_DURATION = 4.0
 
-# FOTOS
 PHOTO_DURATION = 8.2
 PHOTO_DURATION_FIRST = 12.2
 PHOTO_DURATION_LONG = 9.8
@@ -88,12 +85,10 @@ PHOTO_ZOOM_IN_END = 1.07
 PHOTO_ZOOM_OUT_START = 1.05
 PHOTO_ZOOM_OUT_END = 1.00
 
-# FRASES EN FOTOS
 PHRASE_DURATION = 5.0
 PHRASE_FADE = 1.0
 PHRASE_START_DELAY = 1.2
 
-# FINAL
 FINAL_BLACK_BEFORE_LOGO = 3.8
 FINAL_LOGO_DURATION = 5.5
 FINAL_BLACK_HOLD_DURATION = 8.5
@@ -101,13 +96,13 @@ FINAL_FADE = 1.8
 FINAL_LOGO_FADE_IN = 1.8
 FINAL_LOGO_FADE_OUT = 1.8
 
-# AUDIO
 HEART_VOLUME = 3.0
 HEART_FADE_OUT = 2.4
 
 MUSIC_FADE_IN = 4.0
 MUSIC_FADE_OUT = 3.0
 MUSIC_VOLUME = 0.8
+
 
 # =========================================================
 # TEXTOS
@@ -124,6 +119,7 @@ PHOTO_PHRASES = {
     3: "El tiempo pasa...\npero contigo todo se queda.",
     5: "Y aunque cambie la vida...\ntu siempre seras hogar.",
 }
+
 
 # =========================================================
 # PATHS
@@ -260,7 +256,7 @@ def base_text_clip(
 
 
 # =========================================================
-# TEXTO INTRO (LATIDO LENTO)
+# TEXTO INTRO
 # =========================================================
 
 def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0):
@@ -305,7 +301,7 @@ def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0
 
 
 # =========================================================
-# TEXTO FOTOS (SIN LATIDO)
+# TEXTO FOTOS
 # =========================================================
 
 def photo_phrase_text(text, duration, font_size=38, fade=1.0):
@@ -601,7 +597,7 @@ def build_audio(duration, music_path, heart_path):
 
 
 # =========================================================
-# RENDER REUTILIZABLE PARA MAIN
+# RENDER REUTILIZABLE
 # =========================================================
 
 def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
@@ -635,9 +631,6 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        print("🎬 EMPEZANDO RENDER...")
-        print("📁 OUTPUT PATH:", out)
-
         final.write_videofile(
             str(out),
             fps=FPS,
@@ -648,10 +641,6 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
             preset="ultrafast",
             threads=4,
         )
-
-        print("✅ TERMINÓ write_videofile")
-        print("📁 EXISTE ARCHIVO:", out.exists())
-        print("📁 SIZE:", out.stat().st_size if out.exists() else "NO FILE")
 
         print(f"✅ VIDEO CREADO: {out}")
         return str(out)
