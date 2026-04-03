@@ -1,4 +1,4 @@
-# TEST SAVE
+# TEST
 from datetime import datetime
 from pathlib import Path
 import gc
@@ -16,7 +16,6 @@ from moviepy import (
     AudioFileClip,
     ColorClip,
     CompositeAudioClip,
-    CompositeVideoClip,
     ImageClip,
     TextClip,
     concatenate_audioclips,
