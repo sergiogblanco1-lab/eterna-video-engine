@@ -2,6 +2,7 @@ print("🔥 GUARDADO REAL VIDEO ENGINE 🔥")
 print("🔥 ASYNC HARDENED VERSION CARGADA 🔥")
 print("🔥 FLOAT SAFE VERSION CARGADA 🔥")
 print("🔥 TEXT SAFE VERSION CARGADA 🔥")
+print("🔥 CLEANUP + CALLBACK HARDENED VERSION CARGADA 🔥")
 
 from datetime import datetime
 from pathlib import Path
@@ -13,9 +14,8 @@ import traceback
 import threading
 import time
 
-import numpy as np
 import requests
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from PIL import Image, ImageOps
@@ -50,6 +50,7 @@ H = 1280
 FPS = 20
 
 BASE_DIR = Path(__file__).resolve().parent
+
 OUTPUT_DIR = BASE_DIR / "renders"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +89,7 @@ RENDER_LOCK = threading.Lock()
 RENDER_SEMAPHORE = threading.Semaphore(MAX_ACTIVE_RENDER_THREADS)
 
 
-def set_job_status(order_id, status, progress=None, video_url=None, error=None):
+def set_job_status(order_id, status, progress=None, video_url=None, error=None, callback_ok=None):
     global JOBS
 
     with RENDER_LOCK:
@@ -105,6 +106,9 @@ def set_job_status(order_id, status, progress=None, video_url=None, error=None):
 
         if error is not None:
             current["error"] = error
+
+        if callback_ok is not None:
+            current["callback_ok"] = callback_ok
 
         JOBS[order_id] = current
 
@@ -180,7 +184,6 @@ PHRASE_START_DELAY = 1.2
 FINAL_BLACK_BEFORE_LOGO = 3.8
 FINAL_LOGO_DURATION = 5.5
 FINAL_BLACK_HOLD_DURATION = 8.5
-FINAL_FADE = 1.8
 FINAL_LOGO_FADE_IN = 1.8
 FINAL_LOGO_FADE_OUT = 1.8
 
@@ -201,12 +204,6 @@ INTRO_LINES = [
     "No es solo un recuerdo...",
     "Es magia.",
 ]
-
-DEFAULT_PHOTO_PHRASES = {
-    1: "Y de pronto...\ntodo tuvo sentido.",
-    3: "El tiempo pasa...\npero contigo todo se queda.",
-    5: "Y aunque cambie la vida...\ntu siempre seras hogar.",
-}
 
 
 # =========================================================
@@ -461,8 +458,8 @@ def logo_final_clip(duration, logo_final_path: Path):
 # HELPERS DE IMAGEN
 # =========================================================
 
-def normalize_image_to_temp(img_path: Path) -> Path:
-    out_path = TEMP_DIR / f"{img_path.stem}_fixed.jpg"
+def normalize_image_to_temp(img_path: Path, temp_order_dir: Path) -> Path:
+    out_path = temp_order_dir / f"{img_path.stem}_fixed.jpg"
 
     img = Image.open(img_path)
     img = ImageOps.exif_transpose(img)
@@ -472,8 +469,8 @@ def normalize_image_to_temp(img_path: Path) -> Path:
     return out_path
 
 
-def fit_cover(img_path: Path):
-    fixed_path = normalize_image_to_temp(Path(img_path))
+def fit_cover(img_path: Path, temp_order_dir: Path):
+    fixed_path = normalize_image_to_temp(Path(img_path), temp_order_dir)
     clip = ImageClip(str(fixed_path))
     scale = max(W / clip.w, H / clip.h)
     clip = clip.resized(scale)
@@ -492,6 +489,7 @@ def fit_cover(img_path: Path):
 
 def build_photo_clip(
     img_path,
+    temp_order_dir,
     duration,
     phrase=None,
     zoom_mode="in",
@@ -504,7 +502,7 @@ def build_photo_clip(
     move_x = safe_float(move_x)
     move_y = safe_float(move_y)
 
-    base = fit_cover(img_path).with_duration(duration)
+    base = fit_cover(img_path, temp_order_dir).with_duration(duration)
 
     if zoom_mode == "out":
         def zoom_factor(t):
@@ -560,7 +558,7 @@ def build_photo_clip(
 # BLOQUE VIDEO
 # =========================================================
 
-def build_video(photos, logo_inicio_path, logo_final_path, photo_phrases):
+def build_video(photos, logo_inicio_path, logo_final_path, photo_phrases, temp_order_dir):
     clips = []
 
     clips.append(
@@ -614,6 +612,7 @@ def build_video(photos, logo_inicio_path, logo_final_path, photo_phrases):
         clips.append(
             build_photo_clip(
                 p,
+                temp_order_dir=temp_order_dir,
                 duration=duration,
                 phrase=phrase,
                 zoom_mode=movement["zoom_mode"],
@@ -698,12 +697,32 @@ def build_audio(duration, music_path, heart_path):
 
 
 # =========================================================
+# CLEANUP
+# =========================================================
+
+def remove_path_safely(path: Path):
+    try:
+        if not path.exists():
+            return
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+    except Exception as e:
+        print(f"⚠️ No se pudo limpiar {path}: {e}")
+        traceback.print_exc()
+        sys.stdout.flush()
+
+
+# =========================================================
 # RENDER REUTILIZABLE
 # =========================================================
 
-def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
+def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path, temp_order_dir: Path):
     if len(photo_paths) != 6:
         raise ValueError("Se necesitan exactamente 6 fotos")
+
+    temp_order_dir.mkdir(parents=True, exist_ok=True)
 
     photo_phrases = {
         1: clean_render_text(phrase_1),
@@ -731,7 +750,13 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
         print("🔥 logo_final_path:", logo_final_path)
         sys.stdout.flush()
 
-        video = build_video(photos, logo_inicio_path, logo_final_path, photo_phrases)
+        video = build_video(
+            photos=photos,
+            logo_inicio_path=logo_inicio_path,
+            logo_final_path=logo_final_path,
+            photo_phrases=photo_phrases,
+            temp_order_dir=temp_order_dir,
+        )
         print("🔥 build_video OK. duration:", video.duration)
         sys.stdout.flush()
 
@@ -826,7 +851,7 @@ def download_file_with_retry(url: str, dest: Path, retries: int = DOWNLOAD_RETRI
     raise Exception(f"No se pudo descargar tras {retries} intentos: {url}. Último error: {last_error}")
 
 
-def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
+def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> tuple[list[str], Path]:
     if len(photo_urls) != 6:
         raise ValueError("Se necesitan exactamente 6 URLs de fotos")
 
@@ -847,7 +872,7 @@ def prepare_order_inputs(order_id: str, photo_urls: list[str]) -> list[str]:
     print("🔥 prepare_order_inputs OK:", local_paths)
     sys.stdout.flush()
 
-    return local_paths
+    return local_paths, order_input_dir
 
 
 # =========================================================
@@ -917,6 +942,9 @@ def notify_backend_video_ready(order_id: str, video_url: str) -> bool:
 # =========================================================
 
 def process_render_job(order_id: str, photos: list[str], phrases: list[str]):
+    order_input_dir = None
+    temp_order_dir = TEMP_DIR / order_id
+
     with RENDER_SEMAPHORE:
         output_path = OUTPUT_DIR / f"{order_id}.mp4"
 
@@ -926,6 +954,7 @@ def process_render_job(order_id: str, photos: list[str], phrases: list[str]):
                 status="processing",
                 progress=0.10,
                 error=None,
+                callback_ok=None,
             )
 
             print("🚀 BACKGROUND START:", order_id)
@@ -939,13 +968,15 @@ def process_render_job(order_id: str, photos: list[str], phrases: list[str]):
                 except Exception:
                     pass
 
-            photo_paths = prepare_order_inputs(order_id, photos)
+            photo_paths, order_input_dir = prepare_order_inputs(order_id, photos)
+            temp_order_dir.mkdir(parents=True, exist_ok=True)
 
             set_job_status(
                 order_id=order_id,
                 status="processing",
                 progress=0.35,
                 error=None,
+                callback_ok=None,
             )
 
             render_eterna_video(
@@ -954,6 +985,7 @@ def process_render_job(order_id: str, photos: list[str], phrases: list[str]):
                 phrase_2=phrases[1],
                 phrase_3=phrases[2],
                 output_path=str(output_path),
+                temp_order_dir=temp_order_dir,
             )
 
             if not output_path.exists():
@@ -964,18 +996,28 @@ def process_render_job(order_id: str, photos: list[str], phrases: list[str]):
 
             video_url = build_public_video_url(output_path.name)
 
-            set_job_status(
-                order_id=order_id,
-                status="done",
-                progress=1.0,
-                video_url=video_url,
-                error=None,
-            )
+            callback_ok = notify_backend_video_ready(order_id, video_url)
+
+            if callback_ok:
+                set_job_status(
+                    order_id=order_id,
+                    status="done",
+                    progress=1.0,
+                    video_url=video_url,
+                    error=None,
+                    callback_ok=True,
+                )
+            else:
+                set_job_status(
+                    order_id=order_id,
+                    status="done_callback_failed",
+                    progress=1.0,
+                    video_url=video_url,
+                    error="callback_failed",
+                    callback_ok=False,
+                )
 
             print("✅ VIDEO LISTO:", video_url)
-            sys.stdout.flush()
-
-            callback_ok = notify_backend_video_ready(order_id, video_url)
             print("📡 CALLBACK OK:", callback_ok)
             sys.stdout.flush()
 
@@ -988,7 +1030,14 @@ def process_render_job(order_id: str, photos: list[str], phrases: list[str]):
                 order_id=order_id,
                 status="error",
                 error=str(e),
+                callback_ok=False,
             )
+
+        finally:
+            if order_input_dir is not None:
+                remove_path_safely(order_input_dir)
+            remove_path_safely(temp_order_dir)
+            gc.collect()
 
 
 # =========================================================
@@ -1024,7 +1073,7 @@ def get_rendered_video(filename: str):
 
 
 @app.post("/render")
-def render_video(data: RenderRequest, request: Request):
+def render_video(data: RenderRequest):
     print("🎬 REQUEST RECIBIDA:", data.order_id)
     print("🔥 payload photos:", data.photos)
     print("🔥 payload phrases:", data.phrases)
@@ -1041,6 +1090,8 @@ def render_video(data: RenderRequest, request: Request):
     if len(data.phrases) != 3:
         raise HTTPException(status_code=400, detail="Se necesitan 3 frases")
 
+    phrases = [clean_render_text(p) for p in data.phrases]
+
     existing = get_job(order_id)
 
     if existing and existing.get("status") in {"queued", "processing"}:
@@ -1051,12 +1102,13 @@ def render_video(data: RenderRequest, request: Request):
             "message": "render_already_in_progress",
         })
 
-    if existing and existing.get("status") == "done" and existing.get("video_url"):
+    if existing and existing.get("status") in {"done", "done_callback_failed"} and existing.get("video_url"):
         return JSONResponse({
-            "status": "done",
+            "status": existing.get("status"),
             "order_id": order_id,
             "video_url": existing.get("video_url"),
             "status_url": f"/render-status/{order_id}",
+            "callback_ok": existing.get("callback_ok"),
         })
 
     set_job_status(
@@ -1064,11 +1116,12 @@ def render_video(data: RenderRequest, request: Request):
         status="queued",
         progress=0.0,
         error=None,
+        callback_ok=None,
     )
 
     thread = threading.Thread(
         target=process_render_job,
-        args=(order_id, list(data.photos), list(data.phrases)),
+        args=(order_id, list(data.photos), phrases),
         daemon=True,
     )
     thread.start()
@@ -1088,16 +1141,20 @@ def main():
     photos, _, _, _, _ = resolve_paths()
     output_name = f"eterna_local_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
     output_path = OUTPUT_DIR / output_name
+    temp_order_dir = TEMP_DIR / f"local_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    render_eterna_video(
-        photo_paths=[str(p) for p in photos],
-        phrase_1="Y de pronto...\ntodo tuvo sentido.",
-        phrase_2="El tiempo pasa...\npero contigo todo se queda.",
-        phrase_3="Y aunque cambie la vida...\ntu siempre seras hogar.",
-        output_path=str(output_path),
-    )
-
-    print(f"🎉 Render local terminado: {output_path}")
+    try:
+        render_eterna_video(
+            photo_paths=[str(p) for p in photos],
+            phrase_1="Y de pronto...\ntodo tuvo sentido.",
+            phrase_2="El tiempo pasa...\npero contigo todo se queda.",
+            phrase_3="Y aunque cambie la vida...\ntu siempre seras hogar.",
+            output_path=str(output_path),
+            temp_order_dir=temp_order_dir,
+        )
+        print(f"🎉 Render local terminado: {output_path}")
+    finally:
+        remove_path_safely(temp_order_dir)
 
 
 if __name__ == "__main__":
