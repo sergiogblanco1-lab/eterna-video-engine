@@ -1,6 +1,7 @@
 print("🔥 GUARDADO REAL VIDEO ENGINE 🔥")
 print("🔥 ASYNC HARDENED VERSION CARGADA 🔥")
 print("🔥 FLOAT SAFE VERSION CARGADA 🔥")
+print("🔥 TEXT SAFE VERSION CARGADA 🔥")
 
 from datetime import datetime
 from pathlib import Path
@@ -125,6 +126,27 @@ def safe_float(x) -> float:
     return float(x)
 
 
+def clean_render_text(text: str) -> str:
+    text = str(text or "")
+    replacements = {
+        "…": "...",
+        "’": "'",
+        "‘": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "-",
+        "\u00A0": " ",
+        "\u200B": "",
+        "\u200C": "",
+        "\u200D": "",
+        "\ufeff": "",
+    }
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+    return text.strip()
+
+
 # =========================================================
 # DURACIONES
 # =========================================================
@@ -180,7 +202,7 @@ INTRO_LINES = [
     "Es magia.",
 ]
 
-PHOTO_PHRASES = {
+DEFAULT_PHOTO_PHRASES = {
     1: "Y de pronto...\ntodo tuvo sentido.",
     3: "El tiempo pasa...\npero contigo todo se queda.",
     5: "Y aunque cambie la vida...\ntu siempre seras hogar.",
@@ -305,6 +327,8 @@ def base_text_clip(
     height_ratio=0.28,
     stroke_width=1,
 ):
+    text = clean_render_text(text)
+
     return TextClip(
         text=text,
         font_size=safe_int(font_size),
@@ -374,6 +398,8 @@ def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0
 # =========================================================
 
 def photo_phrase_text(text, duration, font_size=38, fade=1.0):
+    text = clean_render_text(text)
+
     base = TextClip(
         text=text,
         font_size=safe_int(font_size),
@@ -534,7 +560,7 @@ def build_photo_clip(
 # BLOQUE VIDEO
 # =========================================================
 
-def build_video(photos, logo_inicio_path, logo_final_path):
+def build_video(photos, logo_inicio_path, logo_final_path, photo_phrases):
     clips = []
 
     clips.append(
@@ -583,7 +609,7 @@ def build_video(photos, logo_inicio_path, logo_final_path):
             duration = PHOTO_DURATION
 
         movement = movement_plan[i]
-        phrase = PHOTO_PHRASES.get(i)
+        phrase = photo_phrases.get(i)
 
         clips.append(
             build_photo_clip(
@@ -676,15 +702,13 @@ def build_audio(duration, music_path, heart_path):
 # =========================================================
 
 def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
-    global PHOTO_PHRASES
-
     if len(photo_paths) != 6:
         raise ValueError("Se necesitan exactamente 6 fotos")
 
-    PHOTO_PHRASES = {
-        1: phrase_1,
-        3: phrase_2,
-        5: phrase_3,
+    photo_phrases = {
+        1: clean_render_text(phrase_1),
+        3: clean_render_text(phrase_2),
+        5: clean_render_text(phrase_3),
     }
 
     video = None
@@ -707,7 +731,7 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
         print("🔥 logo_final_path:", logo_final_path)
         sys.stdout.flush()
 
-        video = build_video(photos, logo_inicio_path, logo_final_path)
+        video = build_video(photos, logo_inicio_path, logo_final_path, photo_phrases)
         print("🔥 build_video OK. duration:", video.duration)
         sys.stdout.flush()
 
