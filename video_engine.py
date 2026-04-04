@@ -1,5 +1,6 @@
 print("🔥 GUARDADO REAL VIDEO ENGINE 🔥")
-print("🔥 ASYNC STABLE VERSION CARGADA 🔥")
+print("🔥 ASYNC HARDENED VERSION CARGADA 🔥")
+print("🔥 FLOAT SAFE VERSION CARGADA 🔥")
 
 from datetime import datetime
 from pathlib import Path
@@ -110,6 +111,18 @@ def set_job_status(order_id, status, progress=None, video_url=None, error=None):
 def get_job(order_id: str):
     with RENDER_LOCK:
         return dict(JOBS.get(order_id, {}))
+
+
+# =========================================================
+# HELPERS NUMÉRICOS
+# =========================================================
+
+def safe_int(x) -> int:
+    return int(round(float(x)))
+
+
+def safe_float(x) -> float:
+    return float(x)
 
 
 # =========================================================
@@ -281,7 +294,7 @@ def resolve_paths():
 # =========================================================
 
 def black_clip(duration):
-    return ColorClip((W, H), color=(0, 0, 0)).with_duration(duration)
+    return ColorClip((safe_int(W), safe_int(H)), color=(0, 0, 0)).with_duration(safe_float(duration))
 
 
 def base_text_clip(
@@ -294,18 +307,18 @@ def base_text_clip(
 ):
     return TextClip(
         text=text,
-        font_size=font_size,
+        font_size=safe_int(font_size),
         color="white",
         method="caption",
-        size=(int(W * width_ratio), int(H * height_ratio)),
+        size=(safe_int(W * width_ratio), safe_int(H * height_ratio)),
         text_align="center",
         horizontal_align="center",
         vertical_align="center",
         stroke_color="black",
-        stroke_width=stroke_width,
-        interline=6,
-        margin=(0, 18),
-    ).with_duration(duration)
+        stroke_width=safe_float(stroke_width),
+        interline=safe_int(6),
+        margin=(safe_int(0), safe_int(18)),
+    ).with_duration(safe_float(duration))
 
 
 # =========================================================
@@ -313,6 +326,9 @@ def base_text_clip(
 # =========================================================
 
 def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0):
+    duration = safe_float(duration)
+    fade = safe_float(fade)
+
     base = base_text_clip(
         text=text,
         duration=duration,
@@ -339,7 +355,7 @@ def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0
     if pos == "center":
         y_pos = ("center", "center")
     else:
-        y_pos = ("center", int(H * 0.60))
+        y_pos = ("center", safe_int(H * 0.60))
 
     return (
         base
@@ -360,22 +376,22 @@ def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0
 def photo_phrase_text(text, duration, font_size=38, fade=1.0):
     base = TextClip(
         text=text,
-        font_size=font_size,
+        font_size=safe_int(font_size),
         color="white",
         method="caption",
-        size=(int(W * 0.78), int(H * 0.26)),
+        size=(safe_int(W * 0.78), safe_int(H * 0.26)),
         text_align="center",
         stroke_color="black",
-        stroke_width=1.1
-    ).with_duration(duration)
+        stroke_width=safe_float(1.1),
+    ).with_duration(safe_float(duration))
 
     return (
         base
         .with_opacity(1.0)
-        .with_position(("center", int(H * 0.62)))
+        .with_position(("center", safe_int(H * 0.62)))
         .with_effects([
-            vfx.FadeIn(fade),
-            vfx.FadeOut(fade),
+            vfx.FadeIn(safe_float(fade)),
+            vfx.FadeOut(safe_float(fade)),
         ])
     )
 
@@ -385,10 +401,10 @@ def photo_phrase_text(text, duration, font_size=38, fade=1.0):
 # =========================================================
 
 def process_logo(logo_path: Path, duration: float, max_w_ratio: float, max_h_ratio: float):
-    logo = ImageClip(str(logo_path)).with_duration(duration)
+    logo = ImageClip(str(logo_path)).with_duration(safe_float(duration))
 
-    max_w = int(W * max_w_ratio)
-    max_h = int(H * max_h_ratio)
+    max_w = safe_int(W * max_w_ratio)
+    max_h = safe_int(H * max_h_ratio)
 
     scale = min(max_w / logo.w, max_h / logo.h)
     logo = logo.resized(scale)
@@ -400,7 +416,7 @@ def logo_inicio_clip(duration, logo_inicio_path: Path):
     return (
         process_logo(logo_inicio_path, duration, 0.85, 0.30)
         .with_effects([
-            vfx.FadeOut(OPEN_LOGO_FADE_OUT)
+            vfx.FadeOut(safe_float(OPEN_LOGO_FADE_OUT))
         ])
     )
 
@@ -409,8 +425,8 @@ def logo_final_clip(duration, logo_final_path: Path):
     return (
         process_logo(logo_final_path, duration, 0.95, 0.82)
         .with_effects([
-            vfx.FadeIn(FINAL_LOGO_FADE_IN),
-            vfx.FadeOut(FINAL_LOGO_FADE_OUT),
+            vfx.FadeIn(safe_float(FINAL_LOGO_FADE_IN)),
+            vfx.FadeOut(safe_float(FINAL_LOGO_FADE_OUT)),
         ])
     )
 
@@ -425,7 +441,7 @@ def normalize_image_to_temp(img_path: Path) -> Path:
     img = Image.open(img_path)
     img = ImageOps.exif_transpose(img)
     rgb = img.convert("RGB")
-    rgb.save(out_path, quality=92)
+    rgb.save(out_path, quality=safe_int(92))
 
     return out_path
 
@@ -437,8 +453,8 @@ def fit_cover(img_path: Path):
     clip = clip.resized(scale)
 
     return clip.cropped(
-        width=W,
-        height=H,
+        width=safe_int(W),
+        height=safe_int(H),
         x_center=clip.w / 2,
         y_center=clip.h / 2,
     )
@@ -458,6 +474,10 @@ def build_photo_clip(
     is_color=False,
     is_first=False,
 ):
+    duration = safe_float(duration)
+    move_x = safe_float(move_x)
+    move_y = safe_float(move_y)
+
     base = fit_cover(img_path).with_duration(duration)
 
     if zoom_mode == "out":
@@ -484,13 +504,13 @@ def build_photo_clip(
         moving = CompositeVideoClip([
             bw.with_opacity(0.7),
             moving.with_opacity(0.3),
-        ], size=(W, H)).with_duration(duration)
+        ], size=(safe_int(W), safe_int(H))).with_duration(duration)
 
     fade_in = PHOTO_FADE_IN + 3.0 if is_first else PHOTO_FADE_IN
 
     moving = moving.with_effects([
-        vfx.FadeIn(fade_in),
-        vfx.FadeOut(PHOTO_FADE_OUT),
+        vfx.FadeIn(safe_float(fade_in)),
+        vfx.FadeOut(safe_float(PHOTO_FADE_OUT)),
     ])
 
     layers = [moving]
@@ -503,11 +523,11 @@ def build_photo_clip(
                 font_size=38,
                 fade=PHRASE_FADE,
             )
-            .with_start(PHRASE_START_DELAY)
+            .with_start(safe_float(PHRASE_START_DELAY))
         )
         layers.append(phrase_clip)
 
-    return CompositeVideoClip(layers, size=(W, H)).with_duration(duration)
+    return CompositeVideoClip(layers, size=(safe_int(W), safe_int(H))).with_duration(duration)
 
 
 # =========================================================
@@ -521,7 +541,7 @@ def build_video(photos, logo_inicio_path, logo_final_path):
         CompositeVideoClip([
             black_clip(OPEN_LOGO_ONLY_DURATION),
             logo_inicio_clip(OPEN_LOGO_ONLY_DURATION, logo_inicio_path),
-        ], size=(W, H)).with_duration(OPEN_LOGO_ONLY_DURATION)
+        ], size=(safe_int(W), safe_int(H))).with_duration(safe_float(OPEN_LOGO_ONLY_DURATION))
     )
 
     clips.append(black_clip(OPEN_LOGO_FADE_DURATION))
@@ -537,7 +557,7 @@ def build_video(photos, logo_inicio_path, logo_final_path):
                     pos="center",
                     fade=INTRO_TEXT_FADE,
                 ),
-            ], size=(W, H)).with_duration(INTRO_TEXT_DURATION)
+            ], size=(safe_int(W), safe_int(H))).with_duration(safe_float(INTRO_TEXT_DURATION))
         )
 
         if i < len(INTRO_LINES) - 1:
@@ -546,12 +566,12 @@ def build_video(photos, logo_inicio_path, logo_final_path):
     clips.append(black_clip(TRANSITION_BLACK_DURATION))
 
     movement_plan = [
-        {"zoom_mode": "in",  "move_x":  18, "move_y":   0},
-        {"zoom_mode": "out", "move_x": -18, "move_y":   0},
-        {"zoom_mode": "in",  "move_x":   0, "move_y": -14},
-        {"zoom_mode": "in",  "move_x":   0, "move_y":  14},
-        {"zoom_mode": "out", "move_x":  16, "move_y":   0},
-        {"zoom_mode": "in",  "move_x": -16, "move_y":   0},
+        {"zoom_mode": "in",  "move_x": 18,  "move_y": 0},
+        {"zoom_mode": "out", "move_x": -18, "move_y": 0},
+        {"zoom_mode": "in",  "move_x": 0,   "move_y": -14},
+        {"zoom_mode": "in",  "move_x": 0,   "move_y": 14},
+        {"zoom_mode": "out", "move_x": 16,  "move_y": 0},
+        {"zoom_mode": "in",  "move_x": -16, "move_y": 0},
     ]
 
     for i, p in enumerate(photos):
@@ -587,12 +607,12 @@ def build_video(photos, logo_inicio_path, logo_final_path):
         CompositeVideoClip([
             black_clip(FINAL_LOGO_DURATION),
             logo_final_clip(FINAL_LOGO_DURATION, logo_final_path),
-        ], size=(W, H)).with_duration(FINAL_LOGO_DURATION)
+        ], size=(safe_int(W), safe_int(H))).with_duration(safe_float(FINAL_LOGO_DURATION))
     )
 
     clips.append(black_clip(FINAL_BLACK_HOLD_DURATION))
 
-    return concatenate_videoclips(clips, method="compose").with_fps(FPS)
+    return concatenate_videoclips(clips, method="compose").with_fps(safe_int(FPS))
 
 
 # =========================================================
@@ -601,7 +621,7 @@ def build_video(photos, logo_inicio_path, logo_final_path):
 
 def loop_audio(audio_clip, duration):
     parts = []
-    remaining = duration
+    remaining = safe_float(duration)
 
     while remaining > 0:
         take = min(audio_clip.duration, remaining)
@@ -612,6 +632,8 @@ def loop_audio(audio_clip, duration):
 
 
 def build_audio(duration, music_path, heart_path):
+    duration = safe_float(duration)
+
     heart_src = AudioFileClip(str(heart_path))
     music_src = AudioFileClip(str(music_path))
 
@@ -629,21 +651,21 @@ def build_audio(duration, music_path, heart_path):
 
     heart_audio = (
         loop_audio(heart_src, heart_duration)
-        .with_start(2)
+        .with_start(safe_float(2))
         .with_effects([
-            afx.AudioFadeOut(HEART_FADE_OUT)
+            afx.AudioFadeOut(safe_float(HEART_FADE_OUT))
         ])
-        .with_volume_scaled(HEART_VOLUME)
+        .with_volume_scaled(safe_float(HEART_VOLUME))
     )
 
     music_audio = (
         loop_audio(music_src, max(0.1, duration - music_start))
-        .with_start(music_start)
+        .with_start(safe_float(music_start))
         .with_effects([
-            afx.AudioFadeIn(MUSIC_FADE_IN),
-            afx.AudioFadeOut(MUSIC_FADE_OUT)
+            afx.AudioFadeIn(safe_float(MUSIC_FADE_IN)),
+            afx.AudioFadeOut(safe_float(MUSIC_FADE_OUT))
         ])
-        .with_volume_scaled(MUSIC_VOLUME)
+        .with_volume_scaled(safe_float(MUSIC_VOLUME))
     )
 
     return CompositeAudioClip([heart_audio, music_audio]).with_duration(duration)
@@ -706,13 +728,13 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
 
         final.write_videofile(
             str(out),
-            fps=FPS,
+            fps=safe_int(FPS),
             codec="libx264",
             audio_codec="aac",
             bitrate=VIDEO_BITRATE,
             audio_bitrate=AUDIO_BITRATE,
             preset="ultrafast",
-            threads=2,
+            threads=safe_int(2),
         )
 
         print("✅ TERMINÓ write_videofile")
@@ -741,16 +763,16 @@ def render_eterna_video(photo_paths, phrase_1, phrase_2, phrase_3, output_path):
 def download_file_with_retry(url: str, dest: Path, retries: int = DOWNLOAD_RETRIES):
     last_error = None
 
-    for attempt in range(1, retries + 1):
+    for attempt in range(1, safe_int(retries) + 1):
         try:
             print(f"⬇️ Descargando intento {attempt}/{retries}: {url}")
             sys.stdout.flush()
 
-            with requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT) as resp:
+            with requests.get(url, stream=True, timeout=safe_int(DOWNLOAD_TIMEOUT)) as resp:
                 resp.raise_for_status()
 
                 with open(dest, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    for chunk in resp.iter_content(chunk_size=safe_int(1024 * 1024)):
                         if chunk:
                             f.write(chunk)
 
@@ -775,7 +797,7 @@ def download_file_with_retry(url: str, dest: Path, retries: int = DOWNLOAD_RETRI
                     pass
 
             if attempt < retries:
-                time.sleep(DOWNLOAD_RETRY_SLEEP)
+                time.sleep(safe_float(DOWNLOAD_RETRY_SLEEP))
 
     raise Exception(f"No se pudo descargar tras {retries} intentos: {url}. Último error: {last_error}")
 
@@ -831,7 +853,7 @@ def notify_backend_video_ready(order_id: str, video_url: str) -> bool:
 
     last_error = None
 
-    for attempt in range(1, CALLBACK_RETRIES + 1):
+    for attempt in range(1, safe_int(CALLBACK_RETRIES) + 1):
         try:
             print(f"📡 Callback intento {attempt}/{CALLBACK_RETRIES}")
             print("📡 URL:", VIDEO_READY_CALLBACK_URL)
@@ -842,7 +864,7 @@ def notify_backend_video_ready(order_id: str, video_url: str) -> bool:
                 VIDEO_READY_CALLBACK_URL,
                 json=payload,
                 headers=headers,
-                timeout=CALLBACK_TIMEOUT,
+                timeout=safe_int(CALLBACK_TIMEOUT),
             )
 
             print("📡 Callback status:", response.status_code)
@@ -859,7 +881,7 @@ def notify_backend_video_ready(order_id: str, video_url: str) -> bool:
             sys.stdout.flush()
 
             if attempt < CALLBACK_RETRIES:
-                time.sleep(CALLBACK_RETRY_SLEEP)
+                time.sleep(safe_float(CALLBACK_RETRY_SLEEP))
 
     print(f"❌ Callback fallido para {order_id}: {last_error}")
     sys.stdout.flush()
