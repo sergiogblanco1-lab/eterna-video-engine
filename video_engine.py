@@ -303,7 +303,7 @@ def base_text_clip(
     font_size=42,
     width_ratio=0.80,
     height_ratio=0.28,
-    stroke_width=1.1,
+    stroke_width=1,
 ):
     return TextClip(
         text=text,
@@ -315,7 +315,7 @@ def base_text_clip(
         horizontal_align="center",
         vertical_align="center",
         stroke_color="black",
-        stroke_width=safe_float(stroke_width),
+        stroke_width=safe_int(stroke_width),
         interline=safe_int(6),
         margin=(safe_int(0), safe_int(18)),
     ).with_duration(safe_float(duration))
@@ -335,7 +335,7 @@ def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0
         font_size=font_size,
         width_ratio=0.80,
         height_ratio=0.28,
-        stroke_width=1.1,
+        stroke_width=1,
     )
 
     def scale_fn(t):
@@ -382,7 +382,7 @@ def photo_phrase_text(text, duration, font_size=38, fade=1.0):
         size=(safe_int(W * 0.78), safe_int(H * 0.26)),
         text_align="center",
         stroke_color="black",
-        stroke_width=safe_float(1.1),
+        stroke_width=safe_int(1),
     ).with_duration(safe_float(duration))
 
     return (
