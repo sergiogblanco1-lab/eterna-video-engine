@@ -132,6 +132,7 @@ def safe_float(x) -> float:
 
 def clean_render_text(text: str) -> str:
     text = str(text or "")
+
     replacements = {
         "…": "...",
         "’": "'",
@@ -140,15 +141,41 @@ def clean_render_text(text: str) -> str:
         "”": '"',
         "–": "-",
         "—": "-",
+        "·": ".",
+        "•": ".",
+
+        # símbolos rotos típicos
+        "✔": "",
+        "✖": "",
+        "✕": "",
+        "✗": "",
+        "☐": "",
+        "☑": "",
+        "☒": "",
+        "□": "",
+        "■": "",
+        "�": "",
+
+        # invisibles peligrosos
         "\u00A0": " ",
         "\u200B": "",
         "\u200C": "",
         "\u200D": "",
         "\ufeff": "",
     }
+
     for bad, good in replacements.items():
         text = text.replace(bad, good)
-    return text.strip()
+
+    # 🔥 CLAVE: mantener español pero eliminar basura
+    allowed_extra = "áéíóúÁÉÍÓÚñÑ¿?¡!.,:;()\"' -"
+
+    cleaned = ""
+    for c in text:
+        if c.isalnum() or c in allowed_extra:
+            cleaned += c
+
+    return cleaned.strip()
 
 
 # =========================================================
