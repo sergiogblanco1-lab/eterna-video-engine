@@ -3,11 +3,13 @@ print("🔥 ASYNC HARDENED VERSION CARGADA 🔥")
 print("🔥 FLOAT SAFE VERSION CARGADA 🔥")
 print("🔥 TEXT SAFE VERSION CARGADA 🔥")
 print("🔥 CLEANUP + CALLBACK HARDENED VERSION CARGADA 🔥")
+print("🔥 FONT SAFE VERSION CARGADA 🔥")
 
 from datetime import datetime
 from pathlib import Path
 import gc
 import os
+import re
 import shutil
 import sys
 import traceback
@@ -65,8 +67,16 @@ ASSETS_DIR = BASE_DIR / "photos_logo"
 VIDEO_BITRATE = "1600k"
 AUDIO_BITRATE = "96k"
 
-VIDEO_ENGINE_PUBLIC_URL = os.getenv("VIDEO_ENGINE_PUBLIC_URL", "").strip().rstrip("/")
-VIDEO_READY_CALLBACK_URL = os.getenv("VIDEO_READY_CALLBACK_URL", "").strip().rstrip("/")
+VIDEO_ENGINE_PUBLIC_URL = os.getenv(
+    "VIDEO_ENGINE_PUBLIC_URL",
+    "https://eterna-video-engine.onrender.com",
+).strip().rstrip("/")
+
+VIDEO_READY_CALLBACK_URL = os.getenv(
+    "VIDEO_READY_CALLBACK_URL",
+    "https://eterna-final.onrender.com/internal/video-ready",
+).strip().rstrip("/")
+
 VIDEO_READY_CALLBACK_SECRET = os.getenv("VIDEO_READY_CALLBACK_SECRET", "").strip()
 
 DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", "180"))
@@ -78,6 +88,32 @@ CALLBACK_RETRIES = int(os.getenv("CALLBACK_RETRIES", "4"))
 CALLBACK_RETRY_SLEEP = float(os.getenv("CALLBACK_RETRY_SLEEP", "3"))
 
 MAX_ACTIVE_RENDER_THREADS = int(os.getenv("MAX_ACTIVE_RENDER_THREADS", "2"))
+
+
+# =========================================================
+# FONT SAFE
+# =========================================================
+
+def resolve_font():
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    ]
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            print("🔥 FONT ENCONTRADA:", candidate)
+            sys.stdout.flush()
+            return candidate
+
+    print("⚠️ No encontré fuente explícita. Usaré fallback de MoviePy/PIL.")
+    sys.stdout.flush()
+    return None
+
+
+FONT_PATH = resolve_font()
 
 
 # =========================================================
@@ -130,6 +166,10 @@ def safe_float(x) -> float:
     return float(x)
 
 
+# =========================================================
+# TEXT SAFE
+# =========================================================
+
 def clean_render_text(text: str) -> str:
     text = str(text or "")
 
@@ -143,8 +183,6 @@ def clean_render_text(text: str) -> str:
         "—": "-",
         "·": ".",
         "•": ".",
-
-        # símbolos rotos típicos
         "✔": "",
         "✖": "",
         "✕": "",
@@ -155,8 +193,6 @@ def clean_render_text(text: str) -> str:
         "□": "",
         "■": "",
         "�": "",
-
-        # invisibles peligrosos
         "\u00A0": " ",
         "\u200B": "",
         "\u200C": "",
@@ -167,15 +203,48 @@ def clean_render_text(text: str) -> str:
     for bad, good in replacements.items():
         text = text.replace(bad, good)
 
-    # 🔥 CLAVE: mantener español pero eliminar basura
-    allowed_extra = "áéíóúÁÉÍÓÚñÑ¿?¡!.,:;()\"' -"
+    allowed_extra = "áéíóúÁÉÍÓÚñÑüÜ¿?¡!.,:;()\"' -\n"
 
     cleaned = ""
     for c in text:
         if c.isalnum() or c in allowed_extra:
             cleaned += c
 
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
     return cleaned.strip()
+
+
+def build_textclip(
+    text,
+    duration,
+    font_size,
+    size,
+    stroke_width=1,
+    margin=(0, 18),
+):
+    text = clean_render_text(text)
+
+    kwargs = {
+        "text": text,
+        "font_size": safe_int(font_size),
+        "color": "white",
+        "method": "caption",
+        "size": size,
+        "text_align": "center",
+        "horizontal_align": "center",
+        "vertical_align": "center",
+        "stroke_color": "black",
+        "stroke_width": safe_int(stroke_width),
+        "interline": safe_int(6),
+        "margin": (safe_int(margin[0]), safe_int(margin[1])),
+    }
+
+    if FONT_PATH:
+        kwargs["font"] = FONT_PATH
+
+    return TextClip(**kwargs).with_duration(safe_float(duration))
 
 
 # =========================================================
@@ -265,7 +334,7 @@ def find_file_flexible(folder: Path, keyword: str) -> Path:
 
 
 def get_photos(inputs_dir: Path):
-    exts = [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]
+    exts = [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG", ".webp", ".WEBP"]
 
     photos = []
 
@@ -302,9 +371,11 @@ def get_photos(inputs_dir: Path):
     all_photos += list(inputs_dir.glob("*.jpg"))
     all_photos += list(inputs_dir.glob("*.jpeg"))
     all_photos += list(inputs_dir.glob("*.png"))
+    all_photos += list(inputs_dir.glob("*.webp"))
     all_photos += list(inputs_dir.glob("*.JPG"))
     all_photos += list(inputs_dir.glob("*.JPEG"))
     all_photos += list(inputs_dir.glob("*.PNG"))
+    all_photos += list(inputs_dir.glob("*.WEBP"))
 
     all_photos = sorted(set(all_photos))
 
@@ -351,22 +422,14 @@ def base_text_clip(
     height_ratio=0.28,
     stroke_width=1,
 ):
-    text = clean_render_text(text)
-
-    return TextClip(
+    return build_textclip(
         text=text,
-        font_size=safe_int(font_size),
-        color="white",
-        method="caption",
+        duration=duration,
+        font_size=font_size,
         size=(safe_int(W * width_ratio), safe_int(H * height_ratio)),
-        text_align="center",
-        horizontal_align="center",
-        vertical_align="center",
-        stroke_color="black",
-        stroke_width=safe_int(stroke_width),
-        interline=safe_int(6),
-        margin=(safe_int(0), safe_int(18)),
-    ).with_duration(safe_float(duration))
+        stroke_width=stroke_width,
+        margin=(0, 18),
+    )
 
 
 # =========================================================
@@ -422,18 +485,14 @@ def pulsing_text_heart_slow(text, duration, font_size=42, pos="center", fade=1.0
 # =========================================================
 
 def photo_phrase_text(text, duration, font_size=38, fade=1.0):
-    text = clean_render_text(text)
-
-    base = TextClip(
+    base = build_textclip(
         text=text,
-        font_size=safe_int(font_size),
-        color="white",
-        method="caption",
+        duration=duration,
+        font_size=font_size,
         size=(safe_int(W * 0.78), safe_int(H * 0.26)),
-        text_align="center",
-        stroke_color="black",
-        stroke_width=safe_int(1),
-    ).with_duration(safe_float(duration))
+        stroke_width=1,
+        margin=(0, 0),
+    )
 
     return (
         base
